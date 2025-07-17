@@ -1,0 +1,28 @@
+[package]
+name = "statistics_api"
+version = "0.0.1"
+edition = "2024"
+
+[dependencies]
+actix-web = { version = "4.11.0", features = ["rustls"] }
+actix-web-httpauth = "0.8.2"
+base64 = "0.22.1"
+tokio = { version = "1.46.1", features = ["full"] }
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+futures-util = "0.3.31"
+jsonwebtoken = "9.3.1"
+toml = "0.9.2"
+clap = { version = "4.5.41", features = ["derive"]}
+rustls = { version = "0.23.29" }
+
+[profile.release]
+lto = true  # Performs “fat” LTO which attempts to perform optimizations across all crates within the dependency graph.
+strip = "none"  # Do not strip debug symbols.
+opt-level = 3  # Optimize for speed.
+
+
+[profile.dev]
+lto = false  # No link-time optimization in development builds.
+strip = "none"  # Do not strip debug symbols.
+opt-level = 0  # No optimizations in development builds.
