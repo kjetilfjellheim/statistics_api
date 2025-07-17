@@ -9,11 +9,11 @@ use crate::model::apperror::{ApplicationError, ErrorType};
 
 #[derive(Debug, Deserialize)]
 struct Claim {
-    _sub: String,
-    _name: String,
-    _admin: bool,
-    _iat: usize,
-    _exp: usize,
+    sub: Option<String>,
+    name: Option<String>,
+    admin: Option<bool>,
+    iat: Option<usize>,
+    exp: Option<usize>,
 }
 
 /**
@@ -43,9 +43,14 @@ impl JwtSecurityService {
      * A Result containing the JwtSecurityService or an ApplicationError if initialization fails.
      */
     pub fn new(public_key: &str, algorithm: &str) -> Result<Self, ApplicationError> {
-        let algorithm = Algorithm::from_str(algorithm).map_err(|err| ApplicationError::new(ErrorType::InitializationError, format!("Invalid algorithm: {}", err)))?;
-        //TODO: Support other than rsa keys.
-        let decoding_key = DecodingKey::from_rsa_pem(public_key.as_bytes()).map_err(|err| ApplicationError::new(ErrorType::InitializationError, format!("Failed to create decoding key: {}", err)))?;
+        let algorithm = Algorithm::from_str(algorithm).map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Invalid algorithm: {err}")))?;
+        let decoding_key = match algorithm {
+            Algorithm::RS256 | Algorithm::RS384 | Algorithm::RS512 => DecodingKey::from_rsa_pem(public_key.as_bytes()).map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Failed to create decoding key: {err}")))?,
+            Algorithm::ES256 | Algorithm::ES384 => DecodingKey::from_ec_pem(public_key.as_bytes()).map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Failed to create decoding key: {err}")))?,
+            Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512 => DecodingKey::from_secret(public_key.as_bytes()),
+            Algorithm::EdDSA => DecodingKey::from_ed_pem(public_key.as_bytes()).map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Failed to create decoding key: {err}")))?,
+            _ => return Err(ApplicationError::new(ErrorType::Initialization, "Unsupported algorithm".to_string())),
+        };
         let validation = Validation::new(algorithm);
         Ok(JwtSecurityService { decoding_key, validation })
     }
@@ -62,15 +67,15 @@ impl JwtSecurityService {
     pub fn validate(&self, http_request: &HttpRequest) -> Result<(), ApplicationError> {
         let credentials = BearerAuth::from_request(http_request, &mut actix_web::dev::Payload::None).into_inner().ok();
         let Some(credentials) = credentials else {
-            return Err(ApplicationError::new(ErrorType::JwtAuthorizationError, "Unauthorized".to_string()));
+            return Err(ApplicationError::new(ErrorType::JwtAuthorization, "Unauthorized".to_string()));
         };
         let _token_data = match jsonwebtoken::decode::<Claim>(credentials.token(), &self.decoding_key, &self.validation) {
             Ok(token_data) => token_data,
             Err(err) => {
-                return Err(ApplicationError::new(ErrorType::JwtAuthorizationError, "Unauthorized".to_string()));
+                eprintln!("JWT validation error: {err}");
+                return Err(ApplicationError::new(ErrorType::JwtAuthorization, "Unauthorized".to_string()));
             }
         };
-        //TODO: Add role validation if needed
         Ok(())
     }
 }

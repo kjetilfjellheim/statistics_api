@@ -1,0 +1,7 @@
+[security]
+jwtSecret = "./public_key.pem"
+jwtAlgorithm = "RS256"
+
+[server]
+workers = 4
+httpPort = 8080

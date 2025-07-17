@@ -30,13 +30,14 @@ pub struct Config {
     pub server: Server,
 }
 
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSecurity {
     /**
-     * JWT PUBLIC key used for verifying tokens.
+     * JWT SECRET used for verifying tokens. This can be a public key file or a secret string.
      */
-    pub jwt_public_key: String,
+    pub jwt_secret: String,
     /**
      * JWT algorithm used for signing tokens.
      */
@@ -72,13 +73,41 @@ pub struct HttpsConfig {
     /**
      * Port for the HTTPS server.
      */
-    pubport: u16,
+    pub port: u16,
     /**
      * Path to the certificate file.
      */
-    pub certificate: String,
+    pub certificate_file: String,
     /**
      * Path to the private key file.
      */
-    pub private_key: String,
+    pub private_key_file: String,
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_config_serialization() {
+        let config = Config {
+            security: AppSecurity {
+                jwt_secret: "/tmp/config/jwt_public_key.pem".to_string(),
+                jwt_algorithm: "RS256".to_string(),
+            },
+            server: Server {
+                workers: 4,
+                http_port: Some(8080),
+                https_config: None,
+            },
+        };
+        let serialized = toml::to_string(&config).unwrap();
+        println!("Serialized Config: {}", serialized);
+        let deserialized: Config = toml::from_str(&serialized).unwrap();
+        assert_eq!(config.security.jwt_secret, deserialized.security.jwt_secret);
+        assert_eq!(config.security.jwt_algorithm, deserialized.security.jwt_algorithm);
+        assert_eq!(config.server.workers, deserialized.server.workers);
+        assert_eq!(config.server.http_port, deserialized.server.http_port);
+        assert!(deserialized.server.https_config.is_none());    
+    }
 }

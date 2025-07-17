@@ -5,9 +5,9 @@ use std::fmt;
  */
 #[derive(Debug, Clone)]
 pub enum ErrorType {
-    InitializationError,
-    JwtAuthorizationError,
-    NotImplementedError,
+    Initialization,
+    JwtAuthorization,
+    NotImplemented,
 }
 
 /**
@@ -34,7 +34,7 @@ impl ApplicationError {
      * `message`: A description of the error.
      */
     pub fn new(error_type: ErrorType, message: String) -> Self {
-        ApplicationError { error_type: error_type, message: message }
+        ApplicationError { error_type, message }
     }
 }
 

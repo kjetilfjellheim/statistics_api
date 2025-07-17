@@ -3,21 +3,22 @@ use actix_web::{
     web::{self, Path},
 };
 
-use crate::{api::state::AppState, model::apperror::ApplicationError};
+use crate::{api::{rest::StatisticsListResponse, state::AppState}, model::apperror::ApplicationError};
 
 /**
  * Endpoint to retrieve a list of statistics types.
  */
-#[get("/statistics")]
+#[get("/api/services/v1_0/statistics")]
 pub async fn statistics_list(http_request: HttpRequest, app_state: web::Data<AppState>) -> Result<HttpResponse, ApplicationError> {
     app_state.jwt_service.validate(&http_request)?;
-    Err(ApplicationError::new(crate::model::apperror::ErrorType::NotImplementedError, "Not implemented".to_string()))
+    let statistics = app_state.statistics_service.get_statistics_list().await?;
+    Ok(HttpResponse::Ok().json(StatisticsListResponse::from(statistics)))
 }
 
 /**
  * Add a new statistics type.
  */
-#[post("/statistics")]
+#[post("/api/services/v1_0/statistics")]
 pub async fn statistics_add() -> &'static str {
     "statistics add"
 }
@@ -25,15 +26,15 @@ pub async fn statistics_add() -> &'static str {
 /**
  * Delete statistics type.
  */
-#[delete("/statistics/{statisticsId}")]
-pub async fn statistics_delete(path: Path<u64>) -> &'static str {
+#[delete("/api/services/v1_0/statistics/{statisticsId}")]
+pub async fn statistics_delete(_path: Path<u64>) -> &'static str {
     "statistics delete"
 }
 
 /**
  * Endpoint to retrieve a list of municipalities.
  */
-#[get("/municipalities")]
+#[get("/api/services/v1_0/municipalities")]
 pub async fn municipalities_list() -> &'static str {
     "municipalities list"
 }
@@ -41,7 +42,7 @@ pub async fn municipalities_list() -> &'static str {
 /**
  * Endpoint to retrieve a list of municipalities.
  */
-#[post("/municipalities")]
+#[post("/api/services/v1_0/municipalities")]
 pub async fn municipalities_add() -> &'static str {
     "municipalities add"
 }
@@ -49,15 +50,15 @@ pub async fn municipalities_add() -> &'static str {
 /**
  * Endpoint to retrieve a list of municipalities.
  */
-#[delete("/municipalities/{municipalityId}")]
-pub async fn municipalities_delete(path: Path<u64>) -> &'static str {
+#[delete("/api/services/v1_0/municipalities/{municipalityId}")]
+pub async fn municipalities_delete(_path: Path<u64>) -> &'static str {
     "municipalities delete"
 }
 
 /**
  * Endpoint to add values.
  */
-#[get("/values:list")]
+#[get("/api/services/v1_0/values:list")]
 pub async fn values_list() -> &'static str {
     "values list"
 }
@@ -65,7 +66,7 @@ pub async fn values_list() -> &'static str {
 /**
  * Endpoint to add values.
  */
-#[post("/values")]
+#[post("/api/services/v1_0/values")]
 pub async fn value_add() -> &'static str {
     "value add"
 }
@@ -73,15 +74,15 @@ pub async fn value_add() -> &'static str {
 /**
  * Endpoint to delete values.
  */
-#[delete("/values/{valueId}")]
-pub async fn value_delete(path: Path<u64>) -> &'static str {
+#[delete("/api/services/v1_0/values/{valueId}")]
+pub async fn value_delete(_path: Path<u64>) -> &'static str {
     "value delete"
 }
 
 /**
  * Endpoint to delete values.
  */
-#[put("/values/{valueId}")]
-pub async fn value_update(path: Path<u64>) -> &'static str {
+#[put("/api/services/v1_0/values/{valueId}")]
+pub async fn value_update(_path: Path<u64>) -> &'static str {
     "value update"
 }
