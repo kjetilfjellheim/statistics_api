@@ -28,8 +28,29 @@ pub struct Config {
      * Server configuration for the application.
      */
     pub server: Server,
+    /**
+     * Database configuration for the application.
+     */
+    pub database: Database,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Database {
+    /**
+     * Type of the database (e.g., PostgreSQL).
+     */
+    pub db_type: DatabaseType,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DatabaseType {
+    /**
+     * PostgreSQL database type.
+     */
+    Postgresql { connection_string: String, max_connections: usize, min_connections: usize, acquire_timeout: u64, idle_timeout: u64, max_lifetime: u64 },
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -60,7 +81,7 @@ pub struct Server {
     pub http_port: Option<u16>,
     /**
      * HTTPS configuration for the server.
-     */ 
+     */
     pub https_config: Option<HttpsConfig>,
 }
 
@@ -91,23 +112,25 @@ mod test {
     #[test]
     fn test_config_serialization() {
         let config = Config {
-            security: AppSecurity {
-                jwt_secret: "/tmp/config/jwt_public_key.pem".to_string(),
-                jwt_algorithm: "RS256".to_string(),
+            database: Database {
+                db_type: DatabaseType::Postgresql {
+                    connection_string: "".to_string(),
+                    max_connections: 5,
+                    min_connections: 1,
+                    acquire_timeout: 30,
+                    idle_timeout: 300,
+                    max_lifetime: 3600,
+                },
             },
-            server: Server {
-                workers: 4,
-                http_port: Some(8080),
-                https_config: None,
-            },
+            security: AppSecurity { jwt_secret: "/tmp/config/jwt_public_key.pem".to_string(), jwt_algorithm: "RS256".to_string() },
+            server: Server { workers: 4, http_port: Some(8080), https_config: None },
         };
         let serialized = toml::to_string(&config).unwrap();
-        println!("Serialized Config: {}", serialized);
         let deserialized: Config = toml::from_str(&serialized).unwrap();
         assert_eq!(config.security.jwt_secret, deserialized.security.jwt_secret);
         assert_eq!(config.security.jwt_algorithm, deserialized.security.jwt_algorithm);
         assert_eq!(config.server.workers, deserialized.server.workers);
         assert_eq!(config.server.http_port, deserialized.server.http_port);
-        assert!(deserialized.server.https_config.is_none());    
+        assert!(deserialized.server.https_config.is_none());
     }
 }

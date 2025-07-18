@@ -1,59 +1,131 @@
 use actix_web::{HttpResponse, ResponseError, http::StatusCode};
 use chrono::Utc;
-use serde::Serialize;
+use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
 
-use crate::model::{apperror::{ApplicationError, ErrorType}, models::{StatisticsDetailType, StatisticsListType}};
+use crate::model::{
+    apperror::{ApplicationError, ErrorType},
+    models::{PaginationOutput, ValueDetailType, ValuesListOutputType},
+};
 
+/***************** Values:list models *********************/
+
+/**
+ * Request structure for listing values.
+ *
+ * This structure is used to filter the values based on municipality ID, statistic ID, and year.
+ */
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValuesListRequest {
+    pub municipality_id: Option<i64>,
+    pub statistic_id: Option<i64>,
+    pub year: Option<i64>,
+}
+
+/**
+ * Response structure for listing values.
+ *
+ * This structure contains a list of statistics details and pagination information.
+ */
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct StatisticsListResponse {
+pub struct ValuesListResponse {
     /**
      * A vector of StatisticsDetailElement representing the statistics details.
      */
-    statistics: Vec<StatisticsDetailElement>,
+    statistics: Vec<ValueDetailElement>,
+    /**
+     * Pagination information for the response.
+     */
+    pagination: PaginationResponse,
 }
 
-impl StatisticsListResponse {
+impl ValuesListResponse {
     /**
-     * Creates a new instance of StatisticsListResponse.
+     * Creates a new instance of ValuesListResponse.
      *
      * # Arguments
-     * `statistics`: A vector of StatisticsDetailElement representing the statistics details.
+     * `statistics`: A vector of ValueDetailElement representing the statistics details.
      *
      * # Returns
-     * A new instance of StatisticsListResponse.
+     * A new instance of ValuesListResponse.
      */
-    pub fn new(statistics: Vec<StatisticsDetailElement>) -> Self {
-        StatisticsListResponse { statistics }
+    pub fn new(statistics: Vec<ValueDetailElement>, pagination: PaginationResponse) -> Self {
+        ValuesListResponse { statistics, pagination }
     }
 }
 
-impl From<StatisticsListType> for StatisticsListResponse {
-    fn from(statistics_list: StatisticsListType) -> Self {
-        let statistics_elements: Vec<StatisticsDetailElement> = statistics_list.statistics.into_iter().map(StatisticsDetailElement::from).collect();
-        StatisticsListResponse::new(statistics_elements)
+/**
+ * Converts from ValuesListOutputType to ValuesListResponse.
+ *
+ * This conversion is used to transform the output of the values list service into a response format suitable for API responses.
+ */
+impl From<ValuesListOutputType> for ValuesListResponse {
+    fn from(output: ValuesListOutputType) -> Self {
+        let statistics: Vec<ValueDetailElement> = output.statistics.into_iter().map(ValueDetailElement::from).collect();
+        let pagination = PaginationResponse::from(output.pagination);
+        ValuesListResponse::new(statistics, pagination)
     }
 }
 
+/**
+ * Represents the details of a value in the Values List API.
+ *
+ * This structure contains information about the statistic, municipality, value, year, and timestamps.
+ */
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct StatisticsDetailElement {
+pub struct ValueDetailElement {
+    /**
+     * The unique identifier for the statistic.
+     */
     id: u64,
+    /**
+     * The ID of the municipality.
+     */
     municipality_id: u64,
+    /**
+     * The name of the municipality.
+     */
     municipality_name: String,
+    /**
+     * The ID of the statistic.
+     */
     statistic_id: u64,
+    /**
+     * The name of the statistic.
+     */
     statistic_name: String,
-    value: f64,
-    year: u16,
+    /**
+     * The value of the statistic.
+     */
+    value: Decimal,
+    /**
+     * The year of the statistic.
+     */
+    year: i64,
+    /**
+     * The timestamp when the statistic was last updated.
+     */
     updated_at: chrono::DateTime<Utc>,
+    /**
+     * The timestamp when the statistic was created.
+     */
     created_at: chrono::DateTime<Utc>,
+    /**
+     * The user who last updated the statistic.
+     */
     updated_by: String,
+    /**
+     * The user who created the statistic.
+     */
     created_by: String,
 }
 
-impl StatisticsDetailElement {
+impl ValueDetailElement {
     /**
-     * Creates a new instance of StatisticsDetailElement.
+     * Creates a new instance of ValueDetailElement.
      *
      * # Arguments
      * `id`: The unique identifier for the statistic.
@@ -69,40 +141,34 @@ impl StatisticsDetailElement {
      * `created_by`: The user who created the statistic.
      *
      * # Returns
-     * A new instance of StatisticsDetailElement.
+     * A new instance of ValueDetailElement.
      */
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: u64,
         municipality_id: u64,
         municipality_name: String,
         statistic_id: u64,
         statistic_name: String,
-        value: f64,
-        year: u16,
+        value: Decimal,
+        year: i64,
         updated_at: chrono::DateTime<Utc>,
         created_at: chrono::DateTime<Utc>,
         updated_by: String,
         created_by: String,
     ) -> Self {
-        StatisticsDetailElement {
-            id,
-            municipality_id,
-            municipality_name,
-            statistic_id,
-            statistic_name,
-            value,
-            year,
-            updated_at,
-            created_at,
-            updated_by,
-            created_by,
-        }
+        ValueDetailElement { id, municipality_id, municipality_name, statistic_id, statistic_name, value, year, updated_at, created_at, updated_by, created_by }
     }
 }
 
-impl From<StatisticsDetailType> for StatisticsDetailElement {
-    fn from(stat: StatisticsDetailType) -> Self {
-        StatisticsDetailElement::new(
+/**
+ * Converts from ValueDetailType to ValueDetailElement.
+ *
+ * This conversion is used to transform the internal value detail type into a response format suitable for API responses.
+ */
+impl From<ValueDetailType> for ValueDetailElement {
+    fn from(stat: ValueDetailType) -> Self {
+        ValueDetailElement::new(
             stat.id,
             stat.municipality_id,
             stat.municipality_name,
@@ -117,6 +183,8 @@ impl From<StatisticsDetailType> for StatisticsDetailElement {
         )
     }
 }
+
+/***************** Error models *********************/
 
 /**
  * Custom error response for the application.
@@ -156,7 +224,7 @@ fn get_statuscode(application_error: &ErrorType) -> StatusCode {
     match application_error {
         ErrorType::JwtAuthorization => StatusCode::UNAUTHORIZED,
         ErrorType::Initialization => StatusCode::INTERNAL_SERVER_ERROR,
-        ErrorType::NotImplemented => StatusCode::NOT_IMPLEMENTED,
+        ErrorType::DatabaseError => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 
@@ -173,6 +241,50 @@ fn get_error_code(application_error: &ErrorType) -> u16 {
     match application_error {
         ErrorType::JwtAuthorization => 1000,
         ErrorType::Initialization => 1001,
-        ErrorType::NotImplemented => 1002,
+        ErrorType::DatabaseError => 1003,
+    }
+}
+
+/***************** Common models *********************/
+
+/**
+ * Pagination query parameters for API requests.
+ */
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaginationQuery {
+    /**
+     * The index of the first item to return.
+     */
+    pub start_index: Option<i64>,
+    /**
+     * The size of the page to return.
+     */
+    pub page_size: Option<i64>,
+}
+
+/**
+ * Pagination response structure.
+ */
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaginationResponse {
+    /**
+     * The starting index of the returned items.
+     */
+    pub start_index: Option<i64>,
+    /**
+     * The size of the page.
+     */
+    pub page_size: Option<i64>,
+    /**
+     * Indicates if there are more items available.
+     */
+    pub has_more_elements: bool,
+}
+
+impl From<PaginationOutput> for PaginationResponse {
+    fn from(pagination_output: PaginationOutput) -> Self {
+        PaginationResponse { start_index: Some(pagination_output.start_index), page_size: Some(pagination_output.page_size), has_more_elements: pagination_output.has_more }
     }
 }

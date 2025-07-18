@@ -7,7 +7,7 @@ use std::fmt;
 pub enum ErrorType {
     Initialization,
     JwtAuthorization,
-    NotImplemented,
+    DatabaseError,
 }
 
 /**
@@ -38,8 +38,13 @@ impl ApplicationError {
     }
 }
 
+/**
+ * Implements the Display trait for ApplicationError.
+ *
+ * This allows ApplicationError to be formatted as a string to be logged.
+ */
 impl fmt::Display for ApplicationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.message)
+        write!(f, "Application error {}", self.message)
     }
 }

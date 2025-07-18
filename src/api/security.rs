@@ -9,11 +9,7 @@ use crate::model::apperror::{ApplicationError, ErrorType};
 
 #[derive(Debug, Deserialize)]
 struct Claim {
-    sub: Option<String>,
-    name: Option<String>,
-    admin: Option<bool>,
-    iat: Option<usize>,
-    exp: Option<usize>,
+
 }
 
 /**
@@ -45,8 +41,12 @@ impl JwtSecurityService {
     pub fn new(public_key: &str, algorithm: &str) -> Result<Self, ApplicationError> {
         let algorithm = Algorithm::from_str(algorithm).map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Invalid algorithm: {err}")))?;
         let decoding_key = match algorithm {
-            Algorithm::RS256 | Algorithm::RS384 | Algorithm::RS512 => DecodingKey::from_rsa_pem(public_key.as_bytes()).map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Failed to create decoding key: {err}")))?,
-            Algorithm::ES256 | Algorithm::ES384 => DecodingKey::from_ec_pem(public_key.as_bytes()).map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Failed to create decoding key: {err}")))?,
+            Algorithm::RS256 | Algorithm::RS384 | Algorithm::RS512 => {
+                DecodingKey::from_rsa_pem(public_key.as_bytes()).map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Failed to create decoding key: {err}")))?
+            }
+            Algorithm::ES256 | Algorithm::ES384 => {
+                DecodingKey::from_ec_pem(public_key.as_bytes()).map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Failed to create decoding key: {err}")))?
+            }
             Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512 => DecodingKey::from_secret(public_key.as_bytes()),
             Algorithm::EdDSA => DecodingKey::from_ed_pem(public_key.as_bytes()).map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Failed to create decoding key: {err}")))?,
             _ => return Err(ApplicationError::new(ErrorType::Initialization, "Unsupported algorithm".to_string())),

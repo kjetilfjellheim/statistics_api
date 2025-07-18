@@ -1,7 +1,15 @@
 [security]
-jwtSecret = "./public_key.pem"
+jwtSecret = "./test_config/public_key.pem"
 jwtAlgorithm = "RS256"
 
 [server]
-workers = 4
+workers = 50
 httpPort = 8080
+
+[database.dbType.postgresql]
+connection_string = "postgres://@greyhawk.forgottendonkey.com:5432/statistics"
+max_connections = 20
+min_connections = 20
+acquire_timeout = 30
+idle_timeout = 300
+max_lifetime = 3600

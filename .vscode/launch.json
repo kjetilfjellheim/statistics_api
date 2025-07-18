@@ -4,12 +4,12 @@
     "type": "lldb",
     "request": "launch",
     "name": "Cargo launch",
-    "cargo": {
-        "args": [
-            "run"
-        ]
-    },
-    "args": []
+    "program": "${workspaceFolder}/target/debug/statistics_api",
+    "cwd": "${workspaceFolder}",
+    "args": [
+        "--config-file",
+        "./test_config/simple_http.toml"
+    ],
 }
 
 

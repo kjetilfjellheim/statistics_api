@@ -9,16 +9,18 @@ use std::io::BufReader;
 use crate::api::security::JwtSecurityService;
 use crate::dao::statistics::StatisticsDao;
 use crate::model::apperror::{ApplicationError, ErrorType};
-use crate::model::config::{AppSecurity, ApplicationArguments, HttpsConfig};
+use crate::model::config::{AppSecurity, ApplicationArguments, DatabaseType, HttpsConfig};
 
 use crate::api::endpoints::{municipalities_add, municipalities_delete, municipalities_list, statistics_add, statistics_delete, statistics_list, value_add, value_delete, value_update, values_list};
 use crate::api::state::AppState;
 use crate::service::statistics::StatisticsService;
 use actix_web::{App, HttpServer, web};
+use actix_web_prom::PrometheusMetricsBuilder;
 use clap::Parser;
 use rustls::pki_types::PrivateKeyDer;
 use rustls::{ServerConfig, SupportedProtocolVersion};
 use rustls_pemfile::{certs, pkcs8_private_keys};
+use sqlx::{Pool, Postgres, pool};
 
 /**
  * Guess, but this might be the main entry point for the application.
@@ -27,16 +29,36 @@ use rustls_pemfile::{certs, pkcs8_private_keys};
 async fn main() -> std::io::Result<()> {
     let args = ApplicationArguments::parse();
     let config = get_config(&args.config_file)?;
+
+    let connection_pool: Pool<Postgres> = match config.clone().database.db_type {
+        DatabaseType::Postgresql { connection_string, max_connections, min_connections, acquire_timeout, idle_timeout, max_lifetime } => pool::PoolOptions::new()
+            .max_connections(max_connections as u32)
+            .min_connections(min_connections as u32)
+            .acquire_timeout(std::time::Duration::from_secs(acquire_timeout))
+            .idle_timeout(std::time::Duration::from_secs(idle_timeout))
+            .max_lifetime(std::time::Duration::from_secs(max_lifetime))
+            .connect(connection_string.as_str())
+            .await
+            .map_err(|err| std::io::Error::other(format!("Failed to create database pool: {err}")))?,
+    };
+
     let jwt_service = get_jwt_service(&config.security)?;
 
     let statistics_dao = StatisticsDao::new();
-    let statistics_service = StatisticsService::new(statistics_dao);
+    let statistics_service = StatisticsService::new(statistics_dao, Some(connection_pool));
 
     let state = web::Data::new(AppState::new(jwt_service.clone(), config.clone(), statistics_service));
 
+    let prometheus = PrometheusMetricsBuilder::new("")
+        .endpoint("/metrics/prometheus")
+        .mask_unmatched_patterns("UNKNOWN")
+        .build()
+        .unwrap();
+
     let server_init = HttpServer::new(move || {
         App::new()
-            .wrap(actix_web::middleware::Logger::default())
+            .wrap(prometheus.clone())
+            .wrap(actix_web::middleware::Logger::default())            
             .app_data(state.clone())
             .service(statistics_list)
             .service(statistics_add)
@@ -72,14 +94,19 @@ async fn main() -> std::io::Result<()> {
  */
 async fn ssl_builder(https_config: &HttpsConfig) -> Result<ServerConfig, ApplicationError> {
     let config_builder = ServerConfig::builder_with_protocol_versions(&get_protocol_versions());
-    let cert_file = &mut BufReader::new(File::open(https_config.clone().certificate_file).map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Failed to read certificate file: {err}")))?);
-    let key_file = &mut BufReader::new(File::open(https_config.clone().private_key_file).map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Failed to read private key file: {err}")))?);
+    let cert_file =
+        &mut BufReader::new(File::open(https_config.clone().certificate_file).map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Failed to read certificate file: {err}")))?);
+    let key_file =
+        &mut BufReader::new(File::open(https_config.clone().private_key_file).map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Failed to read private key file: {err}")))?);
     let cert_chain = certs(cert_file).collect::<Result<Vec<_>, _>>().map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Failed to convert certificate to der: {err}")))?;
     let mut keys = pkcs8_private_keys(key_file)
         .map(|key| key.map(PrivateKeyDer::Pkcs8))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Failed to convert private key to der: {err}")))?;
-    let config = config_builder.with_no_client_auth().with_single_cert(cert_chain, keys.remove(0)).map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Failed to create server config: {err}")))?;
+    let config = config_builder
+        .with_no_client_auth()
+        .with_single_cert(cert_chain, keys.remove(0))
+        .map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Failed to create server config: {err}")))?;
     Ok(config)
 }
 
@@ -90,9 +117,7 @@ async fn ssl_builder(https_config: &HttpsConfig) -> Result<ServerConfig, Applica
  * A vector of supported protocol versions.
  */
 fn get_protocol_versions() -> Vec<&'static SupportedProtocolVersion> {
-    vec![
-        &rustls::version::TLS13
-    ]
+    vec![&rustls::version::TLS13]
 }
 
 /**
