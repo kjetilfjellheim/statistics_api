@@ -7,9 +7,10 @@ workers = 50
 httpPort = 8080
 
 [database.dbType.postgresql]
-connection_string = "postgres://@greyhawk.forgottendonkey.com:5432/statistics"
-max_connections = 20
-min_connections = 20
-acquire_timeout = 30
-idle_timeout = 300
-max_lifetime = 3600
+connectionString = "postgres://statistics_rw:statistics@greyhawk.forgottendonkey.com:5432/statistics"
+maxConnections = 50
+minConnections = 50
+acquireTimeout = 3000
+acquireSlowThreshold = 1000
+idleTimeout = 3000
+maxLifetime = 36000

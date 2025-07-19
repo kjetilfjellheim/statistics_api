@@ -28,15 +28,19 @@ use sqlx::{Pool, Postgres, pool};
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let args = ApplicationArguments::parse();
+
+    log4rs::init_file(args.log_file, Default::default()).map_err(|err| std::io::Error::other(format!("Failed to initialize logging: {err}")))?;
+
     let config = get_config(&args.config_file)?;
 
     let connection_pool: Pool<Postgres> = match config.clone().database.db_type {
-        DatabaseType::Postgresql { connection_string, max_connections, min_connections, acquire_timeout, idle_timeout, max_lifetime } => pool::PoolOptions::new()
+        DatabaseType::Postgresql { connection_string, max_connections, min_connections, acquire_timeout, acquire_slow_threshold, idle_timeout, max_lifetime } => pool::PoolOptions::new()
             .max_connections(max_connections as u32)
             .min_connections(min_connections as u32)
-            .acquire_timeout(std::time::Duration::from_secs(acquire_timeout))
-            .idle_timeout(std::time::Duration::from_secs(idle_timeout))
-            .max_lifetime(std::time::Duration::from_secs(max_lifetime))
+            .acquire_timeout(std::time::Duration::from_millis(acquire_timeout as u64))
+            .acquire_slow_threshold(std::time::Duration::from_millis(acquire_slow_threshold as u64))
+            .idle_timeout(std::time::Duration::from_millis(idle_timeout as u64))
+            .max_lifetime(std::time::Duration::from_millis(max_lifetime as u64))
             .connect(connection_string.as_str())
             .await
             .map_err(|err| std::io::Error::other(format!("Failed to create database pool: {err}")))?,
@@ -53,12 +57,12 @@ async fn main() -> std::io::Result<()> {
         .endpoint("/metrics/prometheus")
         .mask_unmatched_patterns("UNKNOWN")
         .build()
-        .unwrap();
+        .map_err(|err| std::io::Error::other(format!("Failed to create Prometheus metrics: {err}")))?;
 
     let server_init = HttpServer::new(move || {
         App::new()
             .wrap(prometheus.clone())
-            .wrap(actix_web::middleware::Logger::default())            
+            .wrap(actix_web::middleware::Logger::default())
             .app_data(state.clone())
             .service(statistics_list)
             .service(statistics_add)

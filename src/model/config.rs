@@ -12,6 +12,12 @@ pub struct ApplicationArguments {
      */
     #[arg(short, long)]
     pub config_file: String,
+
+    /**
+     * Path to the log file.
+     */
+    #[arg(short, long)]
+    pub log_file: String,
 }
 
 /**
@@ -49,7 +55,8 @@ pub enum DatabaseType {
     /**
      * PostgreSQL database type.
      */
-    Postgresql { connection_string: String, max_connections: usize, min_connections: usize, acquire_timeout: u64, idle_timeout: u64, max_lifetime: u64 },
+    #[serde(rename_all = "camelCase")]
+    Postgresql { connection_string: String, max_connections: usize, min_connections: usize, acquire_timeout: usize, acquire_slow_threshold: usize, idle_timeout: usize, max_lifetime: usize },
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -118,6 +125,7 @@ mod test {
                     max_connections: 5,
                     min_connections: 1,
                     acquire_timeout: 30,
+                    acquire_slow_threshold: 60,
                     idle_timeout: 300,
                     max_lifetime: 3600,
                 },

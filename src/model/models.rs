@@ -12,6 +12,7 @@ use crate::{
 /**
  * Represents the input type for the Values List API.
  */
+#[derive(Debug)]
 pub struct ValuesListInputType {
     /**
      * Optional municipality ID to filter the values.
@@ -132,6 +133,7 @@ impl From<QueryValuesListDbResp> for ValueDetailType {
 /**
  * Input structure for pagination.
  */
+#[derive(Debug)]
 pub struct PaginationInput {
     /**
      * The starting index for pagination.

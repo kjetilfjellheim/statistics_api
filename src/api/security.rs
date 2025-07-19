@@ -8,9 +8,7 @@ use serde::Deserialize;
 use crate::model::apperror::{ApplicationError, ErrorType};
 
 #[derive(Debug, Deserialize)]
-struct Claim {
-
-}
+struct Claim {}
 
 /**
  * JWT Security Service for handling JWT authentication.

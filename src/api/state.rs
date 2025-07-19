@@ -60,7 +60,15 @@ mod test {
         let jwt_service = JwtSecurityService::new(&public_key, "RS256").unwrap();
         let config = Config {
             database: Database {
-                db_type: DatabaseType::Postgresql { connection_string: "".to_string(), max_connections: 5, min_connections: 1, acquire_timeout: 30, idle_timeout: 300, max_lifetime: 3600 },
+                db_type: DatabaseType::Postgresql {
+                    connection_string: "".to_string(),
+                    max_connections: 5,
+                    min_connections: 1,
+                    acquire_timeout: 30,
+                    acquire_slow_threshold: 60,
+                    idle_timeout: 300,
+                    max_lifetime: 3600,
+                },
             },
             security: AppSecurity { jwt_secret: public_key_file, jwt_algorithm: "HS256".to_string() },
             server: Server { workers: 4, http_port: Some(8080), https_config: None },

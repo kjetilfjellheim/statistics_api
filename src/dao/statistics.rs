@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use sqlx::{Pool, Postgres};
+use tracing::instrument;
 
 use crate::model::{
     apperror::{ApplicationError, ErrorType},
@@ -56,6 +57,7 @@ impl StatisticsDao {
      * # Returns
      * A result containing the ValuesListOutputType with the retrieved values and pagination information.
      */
+    #[instrument(level = "info", skip(self, connection_pool), fields(result))]
     pub async fn get_values_list(&self, connection_pool: &Pool<Postgres>, pagination_input: PaginationInput, filter_params: ValuesListInputType) -> Result<ValuesListOutputType, ApplicationError> {
         let results: Vec<QueryValuesListDbResp> = sqlx::query_as(QUERY_VALUES_LIST)
             .bind(filter_params.id_municipality)
