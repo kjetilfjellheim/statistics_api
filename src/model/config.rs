@@ -44,7 +44,7 @@ pub struct Config {
 #[serde(rename_all = "camelCase")]
 pub struct Database {
     /**
-     * Type of the database (e.g., PostgreSQL).
+     * Type of the database (e.g., `PostgreSQL`).
      */
     pub db_type: DatabaseType,
 }
@@ -53,10 +53,10 @@ pub struct Database {
 #[serde(rename_all = "camelCase")]
 pub enum DatabaseType {
     /**
-     * PostgreSQL database type.
+     * `PostgreSQL` database type.
      */
     #[serde(rename_all = "camelCase")]
-    Postgresql { connection_string: String, max_connections: usize, min_connections: usize, acquire_timeout: usize, acquire_slow_threshold: usize, idle_timeout: usize, max_lifetime: usize },
+    Postgresql { connection_string: String, max_connections: u32, min_connections: u32, acquire_timeout: u64, acquire_slow_threshold: u64, idle_timeout: u64, max_lifetime: u64 },
 }
 
 #[derive(Clone, Serialize, Deserialize)]

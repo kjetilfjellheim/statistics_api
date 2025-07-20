@@ -9,6 +9,8 @@
     "args": [
         "--config-file",
         "./test_config/simple_http.toml"
+        "--log-file",
+        "./test_config/logfile.yaml"
     ],
 }
 

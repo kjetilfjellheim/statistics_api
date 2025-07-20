@@ -3,9 +3,128 @@ use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 
 use crate::{
-    api::rest::{PaginationQuery, ValuesListRequest},
-    dao::statistics::QueryValuesListDbResp,
+    api::rest::{PaginationQuery, StatisticsAddRequest, ValuesListRequest},
+    dao::statistics::{QueryStatisticListDbResp, QueryValuesListDbResp},
 };
+
+/***************** Statistic:list models *********************/
+/**
+ * Represents the output type for the Values List API.
+ */
+#[derive(Debug)]
+pub struct StatisticsListOutputType {
+    /**
+     * A list of value details.
+     */
+    pub statistics: Vec<StatisticDetailType>,
+    /**
+     * Pagination information for the values list.
+     */
+    pub pagination: PaginationOutput,
+}
+
+impl StatisticsListOutputType {
+    /**
+     * Creates a new `StatisticsListOutputType`.
+     *
+     * # Arguments
+     * `statistics`: A vector of `StatisticDetailType` representing the statistics.
+     * `pagination`: `PaginationOutput` containing pagination information.
+     */
+    pub fn new(statistics: Vec<StatisticDetailType>, pagination: PaginationOutput) -> Self {
+        StatisticsListOutputType { statistics, pagination }
+    }
+}
+
+#[derive(Debug)]
+pub struct StatisticDetailType {
+    /**
+     * The unique identifier for the statistic.
+     */
+    pub id: i64,
+    /**
+     * The name of the statistic.
+     */
+    pub name: String,
+    /**
+     * The timestamp when the statistic was created.
+     */
+    pub created_at: DateTime<Utc>,
+    /**
+     * The user who created the statistic.
+     */
+    pub created_by: String,
+}
+
+impl StatisticDetailType {
+    /**
+     * Creates a new `StatisticDetailType`.
+     *
+     * # Arguments
+     * `id`: The unique identifier for the statistic.
+     * `name`: The name of the statistic.
+     * `created_at`: The timestamp when the statistic was created.
+     * `created_by`: The user who created the statistic.
+     *
+     * # Returns
+     * A new instance of `StatisticDetailType`.
+     */
+    pub fn new(id: i64, name: String, created_at: DateTime<Utc>, created_by: String) -> Self {
+        StatisticDetailType { id, name, created_at, created_by }
+    }
+}
+
+/**
+ * Converts from db query.
+ */
+impl From<QueryStatisticListDbResp> for StatisticDetailType {
+    fn from(value: QueryStatisticListDbResp) -> Self {
+        StatisticDetailType::new(value.0, value.1, value.2, value.3)
+    }
+}
+
+/***************** Statistic:add models *********************/
+#[derive(Debug)]
+pub struct StatisticAddInputType {
+    /**
+     * Statistic id.
+     */
+    pub id: i64,
+    /**
+     * Name of the statistic.
+     */
+    pub name: String,
+    /**
+     * The user who creates the statistic.
+     */
+    pub created_by: String,
+}
+
+impl StatisticAddInputType {
+    /**
+     * Creates a new `StatisticAddInputType`.
+     *
+     * # Arguments
+     * `id`: The unique identifier for the statistic.
+     * `name`: The name of the statistic.
+     * `created_by`: The user who creates the statistic.
+     *
+     * # Returns
+     * A new instance of `StatisticAddInputType`.
+     */
+    pub fn new(id: i64, name: String, created_by: String) -> Self {
+        StatisticAddInputType { id, name, created_by }
+    }
+}
+
+/**
+ * Converts from request data and jwt claim name to `StatisticAddInputType`.
+ */
+impl From<(web::Json<StatisticsAddRequest>, String)> for StatisticAddInputType {
+    fn from(from: (web::Json<StatisticsAddRequest>, String)) -> Self {
+        StatisticAddInputType::new(from.0.id, from.0.name.clone(), from.1.clone())
+    }
+}
 
 /***************** Values:list models *********************/
 
@@ -29,7 +148,7 @@ pub struct ValuesListInputType {
 }
 
 /**
- * Converts from web::Json<ValuesListRequest> to ValuesListInputType.
+ * Converts from `web::Json<ValuesListRequest>` to `ValuesListInputType`.
  */
 impl From<web::Json<ValuesListRequest>> for ValuesListInputType {
     fn from(request: web::Json<ValuesListRequest>) -> Self {
@@ -40,6 +159,7 @@ impl From<web::Json<ValuesListRequest>> for ValuesListInputType {
 /**
  * Represents the output type for the Values List API.
  */
+#[derive(Debug)]
 pub struct ValuesListOutputType {
     /**
      * A list of value details.
@@ -52,11 +172,11 @@ pub struct ValuesListOutputType {
 }
 
 /**
- * Creates a new ValuesListOutputType.
+ * Creates a new `ValuesListOutputType`.
  *
  * # Arguments
- * `statistics`: A vector of ValueDetailType representing the values.
- * `pagination`: PaginationOutput containing pagination information.
+ * `statistics`: A vector of `ValueDetailType` representing the values.
+ * `pagination`: `PaginationOutput` containing pagination information.
  */
 impl ValuesListOutputType {
     pub fn new(statistics: Vec<ValueDetailType>, pagination: PaginationOutput) -> Self {
@@ -67,11 +187,12 @@ impl ValuesListOutputType {
 /**
  * Represents the details of a value in the Values List API.
  */
+#[derive(Debug)]
 pub struct ValueDetailType {
-    pub id: u64,
-    pub municipality_id: u64,
+    pub id: i64,
+    pub municipality_id: i64,
     pub municipality_name: String,
-    pub statistic_id: u64,
+    pub statistic_id: i64,
     pub statistic_name: String,
     pub value: Decimal,
     pub year: i64,
@@ -83,7 +204,7 @@ pub struct ValueDetailType {
 
 impl ValueDetailType {
     /**
-     * Creates a new ValueDetailType.
+     * Creates a new `ValueDetailType`.
      *
      * # Arguments
      * `id`: The unique identifier for the value.
@@ -99,14 +220,14 @@ impl ValueDetailType {
      * `created_by`: The user who created the value.
      *
      * # Returns
-     * A new instance of ValueDetailType.
+     * A new instance of `ValueDetailType`.
      */
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        id: u64,
-        municipality_id: u64,
+        id: i64,
+        municipality_id: i64,
         municipality_name: String,
-        statistic_id: u64,
+        statistic_id: i64,
         statistic_name: String,
         value: Decimal,
         year: i64,
@@ -124,7 +245,7 @@ impl ValueDetailType {
  */
 impl From<QueryValuesListDbResp> for ValueDetailType {
     fn from(value: QueryValuesListDbResp) -> Self {
-        ValueDetailType::new(value.0 as u64, value.1 as u64, value.9, value.2 as u64, value.10, value.3, value.4, value.5, value.6, value.7, value.8)
+        ValueDetailType::new(value.0, value.1, value.9, value.2, value.10, value.3, value.4, value.5, value.6, value.7, value.8)
     }
 }
 
@@ -147,7 +268,7 @@ pub struct PaginationInput {
 
 impl PaginationInput {
     /**
-     * Creates a new PaginationInput.
+     * Creates a new `PaginationInput`.
      *
      * # Arguments
      * `start_index`: The starting index for pagination.
@@ -159,7 +280,7 @@ impl PaginationInput {
 }
 
 /**
- * Converts from web query to PaginationInput.
+ * Converts from request query parameters to `PaginationInput`.
  */
 impl From<Query<PaginationQuery>> for PaginationInput {
     fn from(query: Query<PaginationQuery>) -> Self {
@@ -170,21 +291,31 @@ impl From<Query<PaginationQuery>> for PaginationInput {
 /**
  * Output structure for pagination.
  */
+#[derive(Debug)]
 pub struct PaginationOutput {
+    /**
+     * The starting index for pagination.
+     */
     pub start_index: i64,
+    /**
+     * The number of items per page.
+     */
     pub page_size: i64,
+    /**
+     * Indicates if there are more items available.
+     */
     pub has_more: bool,
 }
 
-/**
- * Creates a new PaginationOutput.
- *
- * # Arguments
- * `start_index`: The starting index for pagination.
- * `page_size`: The number of items per page.
- * `has_more`: Indicates if there are more items available.
- */
 impl PaginationOutput {
+    /**
+    * Creates a new `PaginationOutput`.
+    *
+    * # Arguments
+    * `start_index`: The starting index for pagination.
+    * `page_size`: The number of items per page.
+    * `has_more`: Indicates if there are more items available.
+    */
     pub fn new(start_index: i64, page_size: i64, has_more: bool) -> Self {
         PaginationOutput { start_index, page_size, has_more }
     }

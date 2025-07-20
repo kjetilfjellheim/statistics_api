@@ -11,7 +11,8 @@ pub struct AppState {
     /**
      * The application configuration.
      */
-    pub _config: Config,
+    #[allow(dead_code)]
+    pub config: Config,
     /**
      * The statistics service for handling statistics-related operations.
      */
@@ -19,16 +20,16 @@ pub struct AppState {
 }
 
 /**
- * Creates a new instance of AppState.
+ * Creates a new instance of `AppState`.
  *
  * # Arguments
  * `jwt_service`: The JWT security service for handling authentication and authorization.
- * `_config`: The application configuration.
+ * `config`: The application configuration.
  * `statistics_service`: The statistics service for handling statistics-related operations.
  */
 impl AppState {
-    pub fn new(jwt_service: JwtSecurityService, _config: Config, statistics_service: StatisticsService) -> Self {
-        AppState { jwt_service, _config, statistics_service }
+    pub fn new(jwt_service: JwtSecurityService, config: Config, statistics_service: StatisticsService) -> Self {
+        AppState { jwt_service, config, statistics_service }
     }
 }
 

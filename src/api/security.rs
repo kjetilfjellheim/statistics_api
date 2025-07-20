@@ -8,7 +8,12 @@ use serde::Deserialize;
 use crate::model::apperror::{ApplicationError, ErrorType};
 
 #[derive(Debug, Deserialize)]
-struct Claim {}
+pub struct Claim {
+    /**
+     * The name of the user.
+     */
+    pub name: String,
+}
 
 /**
  * JWT Security Service for handling JWT authentication.
@@ -27,14 +32,14 @@ pub struct JwtSecurityService {
 
 impl JwtSecurityService {
     /**
-     * Creates a new instance of JwtSecurityService.
+     * Creates a new instance of `JwtSecurityService`.
      *
      * # Arguments
      * `public_key`: The public key used to decode JWT tokens.
      * `algorithm`: The algorithm used for JWT token validation.
      *
      * # Returns
-     * A Result containing the JwtSecurityService or an ApplicationError if initialization fails.
+     * A Result containing the `JwtSecurityService` or an `ApplicationError` if initialization fails.
      */
     pub fn new(public_key: &str, algorithm: &str) -> Result<Self, ApplicationError> {
         let algorithm = Algorithm::from_str(algorithm).map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Invalid algorithm: {err}")))?;
@@ -60,21 +65,21 @@ impl JwtSecurityService {
      * `http_request`: The HTTP request containing the JWT token in the Authorization header.
      *
      * # Returns
-     * A Result indicating success or an ApplicationError if validation fails.
+     * A Result indicating success or an `ApplicationError` if validation fails.
      */
-    pub fn validate(&self, http_request: &HttpRequest) -> Result<(), ApplicationError> {
+    pub fn validate(&self, http_request: &HttpRequest) -> Result<Claim, ApplicationError> {
         let credentials = BearerAuth::from_request(http_request, &mut actix_web::dev::Payload::None).into_inner().ok();
         let Some(credentials) = credentials else {
             return Err(ApplicationError::new(ErrorType::JwtAuthorization, "Unauthorized".to_string()));
         };
-        let _token_data = match jsonwebtoken::decode::<Claim>(credentials.token(), &self.decoding_key, &self.validation) {
+        let token_data = match jsonwebtoken::decode::<Claim>(credentials.token(), &self.decoding_key, &self.validation) {
             Ok(token_data) => token_data,
             Err(err) => {
                 eprintln!("JWT validation error: {err}");
                 return Err(ApplicationError::new(ErrorType::JwtAuthorization, "Unauthorized".to_string()));
             }
         };
-        Ok(())
+        Ok(token_data.claims)
     }
 }
 

@@ -24,8 +24,8 @@ let authHeaders = {
 };
 
 export default function () {
-    let data = { };
-    let res = http.post('http://localhost:8080/api/services/v1_0/values:list?startIndex=0&pageSize=10', JSON.stringify(data), authHeaders);
+    let data = { id: '6914', name: 'Test' };
+    let res = http.post('http://localhost:8080/api/services/v1_0/statistics', JSON.stringify(data), authHeaders);
     check(res, {
         'status is 200': (r) => r.status === 200,
     });

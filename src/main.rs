@@ -17,6 +17,7 @@ use crate::service::statistics::StatisticsService;
 use actix_web::{App, HttpServer, web};
 use actix_web_prom::PrometheusMetricsBuilder;
 use clap::Parser;
+use log4rs::config::Deserializers;
 use rustls::pki_types::PrivateKeyDer;
 use rustls::{ServerConfig, SupportedProtocolVersion};
 use rustls_pemfile::{certs, pkcs8_private_keys};
@@ -29,18 +30,18 @@ use sqlx::{Pool, Postgres, pool};
 async fn main() -> std::io::Result<()> {
     let args = ApplicationArguments::parse();
 
-    log4rs::init_file(args.log_file, Default::default()).map_err(|err| std::io::Error::other(format!("Failed to initialize logging: {err}")))?;
+    log4rs::init_file(args.log_file, Deserializers::default()).map_err(|err| std::io::Error::other(format!("Failed to initialize logging: {err}")))?;
 
     let config = get_config(&args.config_file)?;
 
     let connection_pool: Pool<Postgres> = match config.clone().database.db_type {
         DatabaseType::Postgresql { connection_string, max_connections, min_connections, acquire_timeout, acquire_slow_threshold, idle_timeout, max_lifetime } => pool::PoolOptions::new()
-            .max_connections(max_connections as u32)
-            .min_connections(min_connections as u32)
-            .acquire_timeout(std::time::Duration::from_millis(acquire_timeout as u64))
-            .acquire_slow_threshold(std::time::Duration::from_millis(acquire_slow_threshold as u64))
-            .idle_timeout(std::time::Duration::from_millis(idle_timeout as u64))
-            .max_lifetime(std::time::Duration::from_millis(max_lifetime as u64))
+            .max_connections(max_connections)
+            .min_connections(min_connections)
+            .acquire_timeout(std::time::Duration::from_millis(acquire_timeout))
+            .acquire_slow_threshold(std::time::Duration::from_millis(acquire_slow_threshold))
+            .idle_timeout(std::time::Duration::from_millis(idle_timeout))
+            .max_lifetime(std::time::Duration::from_millis(max_lifetime))
             .connect(connection_string.as_str())
             .await
             .map_err(|err| std::io::Error::other(format!("Failed to create database pool: {err}")))?,
@@ -77,9 +78,9 @@ async fn main() -> std::io::Result<()> {
     });
 
     let server_init = if let Some(http_port) = &config.server.http_port { server_init.bind(("127.0.0.1", *http_port))? } else { server_init };
-    let server_init = if let Some(_https_config) = &config.server.https_config {
-        let ssl_builder = ssl_builder(_https_config).await.map_err(|err| std::io::Error::other(format!("Failed to create SSL/TLS configuration: {err}")))?;
-        server_init.bind_rustls_0_23("127.0.0.1:".to_string() + &_https_config.port.to_string(), ssl_builder).map_err(|err| std::io::Error::other(format!("Failed to bind HTTPS server: {err}")))?
+    let server_init = if let Some(https_config) = &config.server.https_config {
+        let ssl_builder = ssl_builder(https_config).map_err(|err| std::io::Error::other(format!("Failed to create SSL/TLS configuration: {err}")))?;
+        server_init.bind_rustls_0_23("127.0.0.1:".to_string() + &https_config.port.to_string(), ssl_builder).map_err(|err| std::io::Error::other(format!("Failed to bind HTTPS server: {err}")))?
     } else {
         server_init
     };
@@ -96,7 +97,7 @@ async fn main() -> std::io::Result<()> {
  * #Returns
  * A `Result` containing the initialized `ServerConfig` or an `ApplicationError` if initialization fails.
  */
-async fn ssl_builder(https_config: &HttpsConfig) -> Result<ServerConfig, ApplicationError> {
+fn ssl_builder(https_config: &HttpsConfig) -> Result<ServerConfig, ApplicationError> {
     let config_builder = ServerConfig::builder_with_protocol_versions(&get_protocol_versions());
     let cert_file =
         &mut BufReader::new(File::open(https_config.clone().certificate_file).map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Failed to read certificate file: {err}")))?);
