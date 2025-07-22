@@ -104,8 +104,8 @@ impl StatisticsDao {
             .await
             .map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to execute query to get municipality list: {err}")))?;
         let mut elements: Vec<MunicipalityDetailType> = results.into_iter().map(MunicipalityDetailType::from).collect();
-        let pagination_output = Self::get_pagination_output(&pagination_input, i64::try_from(elements.len()).map_err(|_| ApplicationError::new(ErrorType::InvalidInput, "Invalid elements length".to_string()))?);
-        elements.truncate(usize::try_from(pagination_input.page_size).map_err(|_| ApplicationError::new(ErrorType::InvalidInput, "Invalid page size".to_string()))?);
+        let pagination_output = Self::get_pagination_output(&pagination_input, i64::try_from(elements.len()).map_err(|_| ApplicationError::new(ErrorType::Validation, "Invalid elements length".to_string()))?);
+        elements.truncate(usize::try_from(pagination_input.page_size).map_err(|_| ApplicationError::new(ErrorType::Validation, "Invalid page size".to_string()))?);
         Ok(MunicipalityListOutputType::new(elements, pagination_output))
     }
 
@@ -178,8 +178,8 @@ impl StatisticsDao {
             .await
             .map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to execute query to get statistics list: {err}")))?;
         let mut elements: Vec<StatisticDetailType> = results.into_iter().map(StatisticDetailType::from).collect();
-        let pagination_output = Self::get_pagination_output(&pagination_input, i64::try_from(elements.len()).map_err(|_| ApplicationError::new(ErrorType::InvalidInput, "Invalid elements length".to_string()))?);
-        elements.truncate(usize::try_from(pagination_input.page_size).map_err(|_| ApplicationError::new(ErrorType::InvalidInput, "Invalid page size".to_string()))?);
+        let pagination_output = Self::get_pagination_output(&pagination_input, i64::try_from(elements.len()).map_err(|_| ApplicationError::new(ErrorType::Validation, "Invalid elements length".to_string()))?);
+        elements.truncate(usize::try_from(pagination_input.page_size).map_err(|_| ApplicationError::new(ErrorType::Validation, "Invalid page size".to_string()))?);
         Ok(StatisticsListOutputType::new(elements, pagination_output))
     }
 
@@ -256,8 +256,8 @@ impl StatisticsDao {
             .await
             .map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to execute query for values list: {err}")))?;
         let mut elements: Vec<ValueDetailType> = results.into_iter().map(ValueDetailType::from).collect();
-        let pagination_output = Self::get_pagination_output(&pagination_input, i64::try_from(elements.len()).map_err(|_| ApplicationError::new(ErrorType::InvalidInput, "Invalid elements length".to_string()))?);
-        elements.truncate(usize::try_from(pagination_input.page_size).map_err(|_| ApplicationError::new(ErrorType::InvalidInput, "Invalid page size".to_string()))?);
+        let pagination_output = Self::get_pagination_output(&pagination_input, i64::try_from(elements.len()).map_err(|_| ApplicationError::new(ErrorType::Validation, "Invalid elements length".to_string()))?);
+        elements.truncate(usize::try_from(pagination_input.page_size).map_err(|_| ApplicationError::new(ErrorType::Validation, "Invalid page size".to_string()))?);
         Ok(ValuesListOutputType::new(elements, pagination_output))
     }
 
@@ -292,7 +292,7 @@ impl StatisticsDao {
             } else if db_error.code() == Some(Cow::Borrowed("23503")) { // Foreign key violation
                 return ApplicationError::new(ErrorType::ConstraintViolation, "Missing parent value".to_string());
             } else if db_error.code() == Some(Cow::Borrowed("22001")) { // Value too long
-                return ApplicationError::new(ErrorType::InvalidInput, "Value too long".to_string());                
+                return ApplicationError::new(ErrorType::Validation, "Value too long".to_string());                
             }
         }
         ApplicationError::new(ErrorType::DatabaseError, "Failed to execute database operation".to_string())

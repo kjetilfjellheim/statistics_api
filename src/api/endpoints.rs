@@ -25,7 +25,7 @@ pub async fn statistics_list(
     app_state: web::Data<AppState>,
 ) -> Result<HttpResponse, ApplicationError> {
     let _ = app_state.jwt_service.validate(&http_request)?;
-    let pagination_input = PaginationInput::from(pagination);
+    let pagination_input = PaginationInput::from(pagination).validate()?;
     let output_values: StatisticsListOutputType = app_state.statistics_service.get_statistics_list(pagination_input).await?;
     Ok(HttpResponse::Ok().json(StatisticsListResponse::from(output_values)))
 }
@@ -36,7 +36,7 @@ pub async fn statistics_list(
 #[post("/api/services/v1_0/statistics")]
 pub async fn statistics_add(http_request: HttpRequest, request_body: web::Json<StatisticsAddRequest>, app_state: web::Data<AppState>) -> Result<HttpResponse, ApplicationError> {
     let claim = app_state.jwt_service.validate(&http_request)?;
-    let statistics_add_input = StatisticAddInputType::from((request_body, claim.name));
+    let statistics_add_input = StatisticAddInputType::from((request_body, claim.name)).validate()?;
     app_state.statistics_service.add_statistic(statistics_add_input).await?;
     Ok(HttpResponse::Created().finish())
 }
@@ -63,7 +63,7 @@ pub async fn municipalities_list(
     app_state: web::Data<AppState>
 ) -> Result<HttpResponse, ApplicationError> {
     let _ = app_state.jwt_service.validate(&http_request)?;
-    let pagination_input = PaginationInput::from(pagination);
+    let pagination_input = PaginationInput::from(pagination).validate()?;
     let output_values = app_state.statistics_service.get_municipality_list(pagination_input).await?;
     Ok(HttpResponse::Ok().json(MunicipalityListResponse::from(output_values)))
 }
@@ -74,7 +74,7 @@ pub async fn municipalities_list(
 #[post("/api/services/v1_0/municipalities")]
 pub async fn municipalities_add(http_request: HttpRequest, request_body: web::Json<MunicipalityAddRequest>, app_state: web::Data<AppState>) -> Result<HttpResponse, ApplicationError> {
     let claim = app_state.jwt_service.validate(&http_request)?;
-    let municipality_add_input = MunicipalityAddInputType::from((request_body, claim.name));
+    let municipality_add_input = MunicipalityAddInputType::from((request_body, claim.name)).validate()?;
     app_state.statistics_service.add_municipality(municipality_add_input).await?;
     Ok(HttpResponse::Created().finish())
 }
@@ -101,8 +101,8 @@ pub async fn values_list(
     app_state: web::Data<AppState>,
 ) -> Result<HttpResponse, ApplicationError> {
     app_state.jwt_service.validate(&http_request)?;
-    let pagination_input = PaginationInput::from(pagination);
-    let filter_params = ValuesListInputType::from(request_body);
+    let pagination_input = PaginationInput::from(pagination).validate()?;
+    let filter_params = ValuesListInputType::from(request_body).validate()?;
     let output_values = app_state.statistics_service.get_values_list(pagination_input, filter_params).await?;
     Ok(HttpResponse::Ok().json(ValuesListResponse::from(output_values)))
 }

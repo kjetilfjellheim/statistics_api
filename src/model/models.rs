@@ -4,8 +4,10 @@ use rust_decimal::Decimal;
 
 use crate::{
     api::rest::{MunicipalityAddRequest, PaginationQuery, StatisticsAddRequest, ValuesListRequest},
-    dao::statistics::{QueryMunicipalityListDbResp, QueryStatisticListDbResp, QueryValuesListDbResp},
+    dao::statistics::{QueryMunicipalityListDbResp, QueryStatisticListDbResp, QueryValuesListDbResp}, model::apperror::{ApplicationError, ErrorType},
 };
+
+const MAX_PAGE_SIZE: i64 = 100;
 
 /***************** Municipalities:list models *********************/
 /**
@@ -114,6 +116,22 @@ impl MunicipalityAddInputType {
      */
     pub fn new(id: i64, name: String, created_by: String) -> Self {
         MunicipalityAddInputType { id, name, created_by }
+    }
+
+    /**
+     * Validates the municipality input.
+     *
+     * # Returns
+     * A Result containing `MunicipalityAddInputType` or an `ApplicationError`.
+     */
+    pub fn validate(self) -> Result<Self, ApplicationError> {
+        if self.id < 0 {
+            return Err(ApplicationError::new(ErrorType::Validation, "Municipality ID must be non-negative".to_string()));
+        }
+        if self.name.is_empty() {
+            return Err(ApplicationError::new(ErrorType::Validation, "Municipality name cannot be empty".to_string()));
+        }
+        Ok(self)
     }
 }
 
@@ -234,6 +252,22 @@ impl StatisticAddInputType {
     pub fn new(id: i64, name: String, created_by: String) -> Self {
         StatisticAddInputType { id, name, created_by }
     }
+
+    /**
+     * Validates the statistic input.
+     *
+     * # Returns
+     * A Result containing `StatisticAddInputType` or an `ApplicationError`.
+     */
+    pub fn validate(self) -> Result<Self, ApplicationError> {
+        if self.id < 0 {
+            return Err(ApplicationError::new(ErrorType::Validation, "Statistic ID must be non-negative".to_string()));
+        }
+        if self.name.is_empty() {
+            return Err(ApplicationError::new(ErrorType::Validation, "Statistic name cannot be empty".to_string()));
+        }
+        Ok(self)
+    }
 }
 
 /**
@@ -266,6 +300,49 @@ pub struct ValuesListInputType {
     pub year: Option<i64>,
 }
 
+impl ValuesListInputType {
+
+    /**
+     * Creates a new `ValuesListInputType`.
+     *
+     * # Arguments
+     * `id_municipality`: Optional municipality ID to filter the values.
+     * `id_statistic`: Optional statistic ID to filter the values.
+     * `year`: Optional year to filter the values.
+     *
+     * # Returns
+     * A new instance of `ValuesListInputType`.
+     */
+    pub fn new(id_municipality: Option<i64>, id_statistic: Option<i64>, year: Option<i64>) -> Self {
+        ValuesListInputType { id_municipality, id_statistic, year }
+    }
+
+    /**
+     * Validates the values list input.
+     *
+     * # Returns
+     * A Result containing `ValuesListInputType` or an `ApplicationError`.
+     */
+    pub fn validate(self) -> Result<Self, ApplicationError> {
+        if let Some(id) = self.id_municipality {
+            if id < 0 {
+                return Err(ApplicationError::new(ErrorType::Validation, "Municipality ID must be non-negative".to_string()));
+            }
+        }
+        if let Some(id) = self.id_statistic {
+            if id < 0 {
+                return Err(ApplicationError::new(ErrorType::Validation, "Statistic ID must be non-negative".to_string()));
+            }
+        }
+        if let Some(year) = self.year {
+            if year < 0 {
+                return Err(ApplicationError::new(ErrorType::Validation, "Year must be non-negative".to_string()));
+            }
+        }
+        Ok(self)
+    }
+}
+
 /**
  * Converts from `web::Json<ValuesListRequest>` to `ValuesListInputType`.
  */
@@ -273,6 +350,7 @@ impl From<web::Json<ValuesListRequest>> for ValuesListInputType {
     fn from(request: web::Json<ValuesListRequest>) -> Self {
         ValuesListInputType { id_municipality: request.municipality_id, id_statistic: request.statistic_id, year: request.year }
     }
+
 }
 
 /**
@@ -396,6 +474,25 @@ impl PaginationInput {
     pub fn new(start_index: i64, page_size: i64) -> Self {
         PaginationInput { start_index, page_size }
     }
+
+    /**
+     * Validates the pagination input.
+     *
+     * # Returns
+     * A Result containing `PaginationInput` or an `ApplicationError`.
+     */
+    pub fn validate(self) -> Result<Self, ApplicationError> {
+        if self.start_index < 0 {
+            return Err(ApplicationError::new(ErrorType::Validation, "Start index must be non-negative".to_string()));
+        }
+        if self.page_size <= 0 {
+            return Err(ApplicationError::new(ErrorType::Validation, "Page size must be greater than zero".to_string()));
+        }
+        if self.page_size > MAX_PAGE_SIZE {
+            return Err(ApplicationError::new(ErrorType::Validation, format!("Page size must not exceed {}", MAX_PAGE_SIZE)));
+        }
+        Ok(self)
+    }
 }
 
 /**
@@ -437,5 +534,64 @@ impl PaginationOutput {
     */
     pub fn new(start_index: i64, page_size: i64, has_more: bool) -> Self {
         PaginationOutput { start_index, page_size, has_more }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_pagination_input_validation() {
+        let valid_input = PaginationInput::new(0, 10).validate();
+        assert!(valid_input.is_ok());
+
+        let negative_start_index = PaginationInput::new(-1, 10).validate();
+        assert!(negative_start_index.is_err());
+
+        let zero_page_size = PaginationInput::new(0, 0).validate();
+        assert!(zero_page_size.is_err());
+
+        let large_page_size = PaginationInput::new(0, 101).validate();
+        assert!(large_page_size.is_err());  
+    }
+
+    #[test]
+    fn test_add_statistic_input_validation() {
+        let valid_input = StatisticAddInputType::new(1, "Test Statistic".to_string(), "user1".to_string()).validate();
+        assert!(valid_input.is_ok());
+
+        let negative_id = StatisticAddInputType::new(-1, "Test Statistic".to_string(), "user1".to_string()).validate();
+        assert!(negative_id.is_err());
+
+        let empty_name = StatisticAddInputType::new(1, "".to_string(), "user1".to_string()).validate();
+        assert!(empty_name.is_err());
+    }
+
+    #[test]    
+    fn test_values_list_input_validation() {
+        let valid_input = ValuesListInputType::new(Some(1), Some(2), Some(2023)).validate();
+        assert!(valid_input.is_ok());
+
+        let negative_municipality_id = ValuesListInputType::new(Some(-1), Some(2), Some(2023)).validate();
+        assert!(negative_municipality_id.is_err());
+
+        let negative_statistic_id = ValuesListInputType::new(Some(1), Some(-2), Some(2023)).validate();
+        assert!(negative_statistic_id.is_err());
+
+        let negative_year = ValuesListInputType::new(Some(1), Some(2), Some(-2023)).validate();
+        assert!(negative_year.is_err());
+    }
+
+    #[test]
+    fn test_municipality_add_input_validation() {
+        let valid_input = MunicipalityAddInputType::new(1, "Test Municipality".to_string(), "user1".to_string()).validate();
+        assert!(valid_input.is_ok());
+
+        let negative_id = MunicipalityAddInputType::new(-1, "Test Municipality".to_string(), "user1".to_string()).validate();
+        assert!(negative_id.is_err());
+
+        let empty_name = MunicipalityAddInputType::new(1, "".to_string(), "user1".to_string()).validate();
+        assert!(empty_name.is_err());
     }
 }

@@ -433,7 +433,7 @@ impl ResponseError for ApplicationError {
 */
 fn get_statuscode(application_error: &ErrorType) -> StatusCode {
     match application_error {
-        ErrorType::InvalidInput => StatusCode::BAD_REQUEST,
+        ErrorType::Validation => StatusCode::BAD_REQUEST,
         ErrorType::JwtAuthorization => StatusCode::UNAUTHORIZED,
         ErrorType::Initialization | ErrorType::DatabaseError | ErrorType::Application => StatusCode::INTERNAL_SERVER_ERROR,
         ErrorType::NotFound => StatusCode::NOT_FOUND,
@@ -455,7 +455,7 @@ fn get_error_code(application_error: &ErrorType) -> u16 {
         ErrorType::JwtAuthorization => 1000,
         ErrorType::Initialization => 1001,
         ErrorType::DatabaseError => 1003,
-        ErrorType::InvalidInput => 1004,
+        ErrorType::Validation => 1004,
         ErrorType::NotFound => 1005,
         ErrorType::Application => 1006,
         ErrorType::ConstraintViolation => 1007,
@@ -516,7 +516,7 @@ mod test {
         assert_eq!(get_error_code(&ErrorType::JwtAuthorization), 1000);
         assert_eq!(get_error_code(&ErrorType::Initialization), 1001);
         assert_eq!(get_error_code(&ErrorType::DatabaseError), 1003);
-        assert_eq!(get_error_code(&ErrorType::InvalidInput), 1004);
+        assert_eq!(get_error_code(&ErrorType::Validation), 1004);
         assert_eq!(get_error_code(&ErrorType::NotFound), 1005);
         assert_eq!(get_error_code(&ErrorType::Application), 1006);
         assert_eq!(get_error_code(&ErrorType::ConstraintViolation), 1007);
@@ -524,7 +524,7 @@ mod test {
 
     #[test]
     fn test_get_status_codes() {
-        assert_eq!(get_statuscode(&ErrorType::InvalidInput), StatusCode::BAD_REQUEST);
+        assert_eq!(get_statuscode(&ErrorType::Validation), StatusCode::BAD_REQUEST);
         assert_eq!(get_statuscode(&ErrorType::JwtAuthorization), StatusCode::UNAUTHORIZED);
         assert_eq!(get_statuscode(&ErrorType::Initialization), StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(get_statuscode(&ErrorType::DatabaseError), StatusCode::INTERNAL_SERVER_ERROR);

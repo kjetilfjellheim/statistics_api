@@ -8,10 +8,10 @@ pub enum ErrorType {
     Initialization,
     JwtAuthorization,
     DatabaseError,
-    InvalidInput,
     NotFound,
     Application,
     ConstraintViolation,
+    Validation,
 }
 
 /**
