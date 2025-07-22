@@ -2668,6 +2668,7 @@ dependencies = [
  "clap",
  "futures-util",
  "jsonwebtoken",
+ "log",
  "log4rs",
  "prometheus",
  "rust_decimal",

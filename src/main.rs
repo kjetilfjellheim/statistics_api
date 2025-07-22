@@ -6,6 +6,7 @@ mod service;
 use std::fs::File;
 use std::io::BufReader;
 
+use crate::api::middleware;
 use crate::api::security::JwtSecurityService;
 use crate::dao::statistics::StatisticsDao;
 use crate::model::apperror::{ApplicationError, ErrorType};
@@ -14,6 +15,7 @@ use crate::model::config::{AppSecurity, ApplicationArguments, DatabaseType, Http
 use crate::api::endpoints::{municipalities_add, municipalities_delete, municipalities_list, statistics_add, statistics_delete, statistics_list, value_add, value_delete, value_update, values_list};
 use crate::api::state::AppState;
 use crate::service::statistics::StatisticsService;
+use actix_web::middleware::from_fn;
 use actix_web::{App, HttpServer, web};
 use actix_web_prom::PrometheusMetricsBuilder;
 use clap::Parser;
@@ -63,6 +65,7 @@ async fn main() -> std::io::Result<()> {
     let server_init = HttpServer::new(move || {
         App::new()
             .wrap(prometheus.clone())
+            .wrap(from_fn(middleware::timing_middleware))
             .wrap(actix_web::middleware::Logger::default())
             .app_data(state.clone())
             .service(statistics_list)

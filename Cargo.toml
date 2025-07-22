@@ -26,6 +26,7 @@ prometheus = "0.14.0" #For prometheus monitoring
 actix-web-prom = { version = "0.10.0", features = ["process"]} #For prometheus monitoring
 log4rs = { version = "1.3.0", features = ["rolling_file_appender", "compound_policy", "time_trigger"] } # For logging
 tracing = "0.1.41" # For structured logging
+log = "0.4.27" # For logging
 
 [profile.release]
 lto = true  # Performs “fat” LTO which attempts to perform optimizations across all crates within the dependency graph.

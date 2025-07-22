@@ -75,7 +75,7 @@ impl JwtSecurityService {
         let token_data = match jsonwebtoken::decode::<Claim>(credentials.token(), &self.decoding_key, &self.validation) {
             Ok(token_data) => token_data,
             Err(err) => {
-                eprintln!("JWT validation error: {err}");
+                log::warn!("JWT validation error: {err}");
                 return Err(ApplicationError::new(ErrorType::JwtAuthorization, "Unauthorized".to_string()));
             }
         };

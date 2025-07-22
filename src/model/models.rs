@@ -303,21 +303,6 @@ pub struct ValuesListInputType {
 impl ValuesListInputType {
 
     /**
-     * Creates a new `ValuesListInputType`.
-     *
-     * # Arguments
-     * `id_municipality`: Optional municipality ID to filter the values.
-     * `id_statistic`: Optional statistic ID to filter the values.
-     * `year`: Optional year to filter the values.
-     *
-     * # Returns
-     * A new instance of `ValuesListInputType`.
-     */
-    pub fn new(id_municipality: Option<i64>, id_statistic: Option<i64>, year: Option<i64>) -> Self {
-        ValuesListInputType { id_municipality, id_statistic, year }
-    }
-
-    /**
      * Validates the values list input.
      *
      * # Returns
