@@ -7,7 +7,7 @@ use tracing::instrument;
 
 use crate::model::{
     apperror::{ApplicationError, ErrorType},
-    models::{PaginationInput, PaginationOutput, StatisticAddInputType, StatisticDetailType, StatisticsListOutputType, ValueDetailType, ValuesListInputType, ValuesListOutputType},
+    models::{MunicipalityAddInputType, MunicipalityDetailType, MunicipalityListOutputType, PaginationInput, PaginationOutput, StatisticAddInputType, StatisticDetailType, StatisticsListOutputType, ValueDetailType, ValuesListInputType, ValuesListOutputType},
 };
 
 /**
@@ -21,9 +21,19 @@ pub type QueryValuesListDbResp = (i64, i64, i64, Decimal, i64, DateTime<Utc>, Da
 pub type QueryStatisticListDbResp = (i64, String, DateTime<Utc>, String);
 
 /**
+ * Database response type for querying the municipality list.
+ */
+pub type QueryMunicipalityListDbResp = (i64, String, DateTime<Utc>, String);
+
+/**
  * SQL query to retrieve a list of statistics.
  */
 const QUERY_STATISTICS_LIST: &str = "SELECT id, name, inserted_at, inserted_by FROM statistics ORDER BY id LIMIT $1 OFFSET $2";
+
+/**
+ * SQL query to retrieve a list of municipalities.
+ */
+const QUERY_MUNICIPALITY_LIST: &str = "SELECT id, name, created_at, created_by FROM municipality ORDER BY id LIMIT $1 OFFSET $2";
 
 /**
  * SQL query to add a new statistic.
@@ -31,9 +41,20 @@ const QUERY_STATISTICS_LIST: &str = "SELECT id, name, inserted_at, inserted_by F
 const ADD_STATISTIC: &str = "INSERT INTO statistics (id, name, inserted_by, inserted_at) VALUES ($1, $2, $3, now())";
 
 /**
+ * SQL query to add a new municipality.
+ */
+const ADD_MUNICIPALITY: &str = "INSERT INTO municipality (id, name, created_by, created_at) VALUES ($1, $2, $3, now())";
+
+
+/**
 * SQL query to delete a statistic.
 */
 const DELETE_STATISTIC: &str = "DELETE FROM statistics WHERE id = $1";
+
+/**
+ * SQL query to delete a municipality.
+ */
+const DELETE_MUNICIPALITY: &str = "DELETE FROM municipality WHERE id = $1";
 
 /**
  * SQL query to retrieve a list of values based on municipality ID, statistic ID, and year.
@@ -62,6 +83,80 @@ impl StatisticsDao {
      */
     pub fn new() -> Self {
         StatisticsDao {}
+    }
+
+    /**
+     * Retrieves a list of municipalities based on the provided pagination input.
+     *
+     * # Arguments
+     * `connection_pool`: The database connection pool.
+     * `pagination_input`: `PaginationInput` containing pagination information.
+     *
+     * # Returns
+     * A Result containing `MunicipalityListOutputType` or an `ApplicationError`.
+     */
+    #[instrument(level = "debug", skip(self, connection_pool), fields(result))]
+    pub async fn get_municipality_list(&self, connection_pool: &Pool<Postgres>, pagination_input: PaginationInput) -> Result<MunicipalityListOutputType, ApplicationError> {
+        let results: Vec<QueryMunicipalityListDbResp> = sqlx::query_as(QUERY_MUNICIPALITY_LIST)
+            .bind(pagination_input.page_size + 1)
+            .bind(pagination_input.start_index)
+            .fetch_all(connection_pool)
+            .await
+            .map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to execute query to get municipality list: {err}")))?;
+        let mut elements: Vec<MunicipalityDetailType> = results.into_iter().map(MunicipalityDetailType::from).collect();
+        let pagination_output = Self::get_pagination_output(&pagination_input, i64::try_from(elements.len()).map_err(|_| ApplicationError::new(ErrorType::InvalidInput, "Invalid elements length".to_string()))?);
+        elements.truncate(usize::try_from(pagination_input.page_size).map_err(|_| ApplicationError::new(ErrorType::InvalidInput, "Invalid page size".to_string()))?);
+        Ok(MunicipalityListOutputType::new(elements, pagination_output))
+    }
+
+    /**
+     * Adds a new municipality to the database.
+     *
+     * # Arguments
+     * `connection_pool`: The database connection pool.
+     * `municipality_add_input`: The input containing details of the municipality to be added.
+     *
+     * # Returns
+     * A result indicating success or failure of the operation.
+     */
+    #[instrument(level = "debug", skip(self, transaction), fields(result))]
+    pub async fn add_municipality(&self, transaction: &mut PgConnection, municipality_add_input: MunicipalityAddInputType) -> Result<(), ApplicationError> {
+        sqlx::query(ADD_MUNICIPALITY)
+            .bind(municipality_add_input.id)
+            .bind(municipality_add_input.name)
+            .bind(municipality_add_input.created_by)
+            .execute(transaction)
+            .await
+            .map_err(|err| {
+                Self::handle_database_error(err.as_database_error())
+            })?;
+        Ok(())
+    }
+
+    /**
+     * Deletes a municipality from the database by its ID.
+     *
+     * # Arguments
+     * `connection_pool`: The database connection pool.
+     * `municipality_id`: The ID of the municipality to be deleted.
+     *
+     * # Returns
+     * A result indicating success or failure of the operation.
+     */
+    #[instrument(level = "debug", skip(self, transaction), fields(result))]
+    pub async fn delete_municipality(&self, transaction: &mut PgConnection, municipality_id: i64) -> Result<(), ApplicationError> {
+        let result =sqlx::query(DELETE_MUNICIPALITY)
+            .bind(municipality_id)
+            .execute(transaction)
+            .await
+            .map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to execute query to delete municipality: {err}")))?;
+        if result.rows_affected() == 0 {
+            return Err(ApplicationError::new(ErrorType::NotFound, "Municipality not found".to_string()));
+        }
+        if result.rows_affected() > 1 {
+            return Err(ApplicationError::new(ErrorType::Application, "Multiple municipalities attempted deleted. Rolled back".to_string()));
+        }
+        Ok(())
     }
 
     /**

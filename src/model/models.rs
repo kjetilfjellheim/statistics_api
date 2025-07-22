@@ -3,9 +3,128 @@ use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 
 use crate::{
-    api::rest::{PaginationQuery, StatisticsAddRequest, ValuesListRequest},
-    dao::statistics::{QueryStatisticListDbResp, QueryValuesListDbResp},
+    api::rest::{MunicipalityAddRequest, PaginationQuery, StatisticsAddRequest, ValuesListRequest},
+    dao::statistics::{QueryMunicipalityListDbResp, QueryStatisticListDbResp, QueryValuesListDbResp},
 };
+
+/***************** Municipalities:list models *********************/
+/**
+ * Represents the output type for the Values List API.
+ */
+#[derive(Debug)]
+pub struct MunicipalityListOutputType {
+    /**
+     * A list of value details.
+     */
+    pub municipalities: Vec<MunicipalityDetailType>,
+    /**
+     * Pagination information for the values list.
+     */
+    pub pagination: PaginationOutput,
+}
+
+impl MunicipalityListOutputType {
+    /**
+     * Creates a new `MunicipalityListOutputType`.
+     *
+     * # Arguments
+     * `statistics`: A vector of `StatisticDetailType` representing the statistics.
+     * `pagination`: `PaginationOutput` containing pagination information.
+     */
+    pub fn new(municipalities: Vec<MunicipalityDetailType>, pagination: PaginationOutput) -> Self {
+        MunicipalityListOutputType { municipalities, pagination }
+    }
+}
+
+#[derive(Debug)]
+pub struct MunicipalityDetailType {
+    /**
+     * The unique identifier for the municipality.
+     */
+    pub id: i64,
+    /**
+     * The name of the municipality.
+     */
+    pub name: String,
+    /**
+     * The timestamp when the municipality was created.
+     */
+    pub created_at: DateTime<Utc>,
+    /**
+     * The user who created the municipality.
+     */
+    pub created_by: String,
+}
+
+impl MunicipalityDetailType {
+    /**
+     * Creates a new `MunicipalityDetailType`.
+     *
+     * # Arguments
+     * `id`: The unique identifier for the municipality.
+     * `name`: The name of the municipality.
+     * `created_at`: The timestamp when the municipality was created.
+     * `created_by`: The user who created the municipality.
+     *
+     * # Returns
+     * A new instance of `MunicipalityDetailType`.
+     */
+    pub fn new(id: i64, name: String, created_at: DateTime<Utc>, created_by: String) -> Self {
+        MunicipalityDetailType { id, name, created_at, created_by }
+    }
+}
+
+/**
+ * Converts from db query.
+ */
+impl From<QueryMunicipalityListDbResp> for MunicipalityDetailType {
+    fn from(value: QueryMunicipalityListDbResp) -> Self {
+        MunicipalityDetailType::new(value.0, value.1, value.2, value.3)
+    }
+}
+
+/***************** Municipality:add models *********************/
+#[derive(Debug)]
+pub struct MunicipalityAddInputType {
+    /**
+     * municipality id.
+     */
+    pub id: i64,
+    /**
+     * Name of the municipality.
+     */
+    pub name: String,
+    /**
+     * The user who creates the municipality.
+     */
+    pub created_by: String,
+}
+
+impl MunicipalityAddInputType {
+    /**
+     * Creates a new `MunicipalityAddInputType`.
+     *
+     * # Arguments
+     * `id`: The unique identifier for the municipality.
+     * `name`: The name of the municipality.
+     * `created_by`: The user who creates the municipality.
+     *
+     * # Returns
+     * A new instance of `MunicipalityAddInputType`.
+     */
+    pub fn new(id: i64, name: String, created_by: String) -> Self {
+        MunicipalityAddInputType { id, name, created_by }
+    }
+}
+
+/**
+ * Converts from request data and jwt claim name to `MunicipalityAddInputType`.
+ */
+impl From<(web::Json<MunicipalityAddRequest>, String)> for MunicipalityAddInputType {
+    fn from(from: (web::Json<MunicipalityAddRequest>, String)) -> Self {
+        MunicipalityAddInputType::new(from.0.id, from.0.name.clone(), from.1.clone())
+    }
+}
 
 /***************** Statistic:list models *********************/
 /**

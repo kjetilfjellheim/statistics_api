@@ -5,8 +5,114 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::{
     apperror::{ApplicationError, ErrorType},
-    models::{PaginationOutput, StatisticDetailType, StatisticsListOutputType, ValueDetailType, ValuesListOutputType},
+    models::{MunicipalityDetailType, MunicipalityListOutputType, PaginationOutput, StatisticDetailType, StatisticsListOutputType, ValueDetailType, ValuesListOutputType},
 };
+
+/***************** Municipality:list models *********************/
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MunicipalityListRequest {}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MunicipalityListResponse {
+    /**
+     * A vector of `MunicipalityDetailElement` representing the municipality details.
+     */
+    pub municipalities: Vec<MunicipalityDetailElement>,
+    /**
+     * Pagination information for the response.
+     */
+    pub pagination: PaginationResponse,
+}
+
+
+impl MunicipalityListResponse {
+    /** 
+     * Creates a new instance of `MunicipalityListResponse`.
+     *
+     * # Arguments
+     * `municipalities`: A vector of `StatisticsDetailElement` representing the statistics details.
+     * `pagination`: `PaginationResponse` containing pagination information.
+     *
+     * # Returns
+     * A new instance of `MunicipalityListResponse`.
+     */
+    pub fn new(municipalities: Vec<MunicipalityDetailElement>, pagination: PaginationResponse) -> Self {
+        MunicipalityListResponse { municipalities, pagination }
+    }
+}
+impl From<MunicipalityListOutputType> for MunicipalityListResponse {
+    fn from(output: MunicipalityListOutputType) -> Self {
+        let municipalities: Vec<MunicipalityDetailElement> = output.municipalities.into_iter().map(MunicipalityDetailElement::from).collect();
+        let pagination = PaginationResponse::from(output.pagination);
+        MunicipalityListResponse::new(municipalities, pagination)
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MunicipalityDetailElement {
+    /**
+     * The unique identifier for the municipality.
+     */
+    pub id: i64,
+    /**
+     * The name of the municipality.
+     */
+    pub name: String,
+    /**
+     * The timestamp when the municipality was created.
+     */
+    pub created_at: chrono::DateTime<Utc>,
+    /**
+     * The user who created the municipality.
+     */
+    pub created_by: String,
+}
+
+impl MunicipalityDetailElement {
+    /**
+     * Creates a new instance of `MunicipalityDetailElement`.
+     *
+     * # Arguments
+     * `id`: The unique identifier for the municipality.
+     * `name`: The name of the municipality.
+     * `created_at`: The timestamp when the municipality was created.
+     * `created_by`: The user who created the municipality.
+     *
+     * # Returns
+     * A new instance of `MunicipalityDetailElement`.
+     */
+    pub fn new(id: i64, name: String, created_at: chrono::DateTime<Utc>, created_by: String) -> Self {
+        MunicipalityDetailElement { id, name, created_at, created_by }
+    }
+}
+
+/**
+ * Converts from internal model to rest model.
+ */
+impl From<MunicipalityDetailType> for MunicipalityDetailElement {
+    fn from(stat: MunicipalityDetailType) -> Self {
+        MunicipalityDetailElement::new(stat.id, stat.name, stat.created_at, stat.created_by)
+    }
+}
+
+/***************** Municipality:add models *********************/
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MunicipalityAddRequest {
+    /**
+     * The unique identifier for the municipality.
+     */
+    pub id: i64,
+    /**
+     * The name of the municipality.
+     */
+    pub name: String,
+}
 
 /***************** Statistics:list models *********************/
 
@@ -89,6 +195,9 @@ impl StatisticDetailElement {
     }
 }
 
+/**
+ * Converts from internal model to rest model.
+ */
 impl From<StatisticDetailType> for StatisticDetailElement {
     fn from(stat: StatisticDetailType) -> Self {
         StatisticDetailElement::new(stat.id, stat.name, stat.created_at, stat.created_by)
@@ -394,5 +503,108 @@ pub struct PaginationResponse {
 impl From<PaginationOutput> for PaginationResponse {
     fn from(pagination_output: PaginationOutput) -> Self {
         PaginationResponse { start_index: Some(pagination_output.start_index), page_size: Some(pagination_output.page_size), has_more_elements: pagination_output.has_more }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::model::apperror::ErrorType;
+
+    #[test]
+    fn test_get_error_codes() {
+        assert_eq!(get_error_code(&ErrorType::JwtAuthorization), 1000);
+        assert_eq!(get_error_code(&ErrorType::Initialization), 1001);
+        assert_eq!(get_error_code(&ErrorType::DatabaseError), 1003);
+        assert_eq!(get_error_code(&ErrorType::InvalidInput), 1004);
+        assert_eq!(get_error_code(&ErrorType::NotFound), 1005);
+        assert_eq!(get_error_code(&ErrorType::Application), 1006);
+        assert_eq!(get_error_code(&ErrorType::ConstraintViolation), 1007);
+    }
+
+    #[test]
+    fn test_get_status_codes() {
+        assert_eq!(get_statuscode(&ErrorType::InvalidInput), StatusCode::BAD_REQUEST);
+        assert_eq!(get_statuscode(&ErrorType::JwtAuthorization), StatusCode::UNAUTHORIZED);
+        assert_eq!(get_statuscode(&ErrorType::Initialization), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(get_statuscode(&ErrorType::DatabaseError), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(get_statuscode(&ErrorType::NotFound), StatusCode::NOT_FOUND);
+        assert_eq!(get_statuscode(&ErrorType::Application), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(get_statuscode(&ErrorType::ConstraintViolation), StatusCode::CONFLICT);
+    }
+
+    #[test]
+    fn test_application_error_to_response() {
+        let error = ApplicationError::new(ErrorType::NotFound, "Resource not found".to_string());
+        let response = error.error_response();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn test_pagination_response_from_output() {
+        let pagination_output = PaginationOutput { start_index: 0, page_size: 10, has_more: true };
+        let pagination_response = PaginationResponse::from(pagination_output);
+        assert_eq!(pagination_response.start_index, Some(0));
+        assert_eq!(pagination_response.page_size, Some(10));
+        assert!(pagination_response.has_more_elements);
+    }
+
+    #[test]
+    fn test_municipality_detail_element_from_type() {
+        let detail_type = MunicipalityDetailType {
+            id: 1,
+            name: "Test Municipality".to_string(),
+            created_at: Utc::now(),
+            created_by: "admin".to_string(),
+        };
+        let detail_element: MunicipalityDetailElement = detail_type.into();
+        assert_eq!(detail_element.id, 1);
+        assert_eq!(detail_element.name, "Test Municipality");
+        assert!(detail_element.created_at.timestamp() > 0);
+        assert_eq!(detail_element.created_by, "admin");
+    }
+
+    #[test]
+    fn test_statistic_detail_element_from_type() {
+        let detail_type = StatisticDetailType {
+            id: 1,
+            name: "Test Statistic".to_string(),
+            created_at: Utc::now(),
+            created_by: "admin".to_string(),
+        };
+        let detail_element: StatisticDetailElement = detail_type.into();
+        assert_eq!(detail_element.id, 1);
+        assert_eq!(detail_element.name, "Test Statistic");
+        assert!(detail_element.created_at.timestamp() > 0);
+        assert_eq!(detail_element.created_by, "admin");
+    }
+
+    #[test]
+    fn test_value_detail_element_from_type() {
+        let detail_type = ValueDetailType {
+            id: 1,
+            municipality_id: 1,
+            municipality_name: "Test Municipality".to_string(),
+            statistic_id: 1,
+            statistic_name: "Test Statistic".to_string(),
+            value: Decimal::new(100, 2),
+            year: 2023,
+            updated_at: Utc::now(),
+            created_at: Utc::now(),
+            updated_by: "admin".to_string(),
+            created_by: "admin".to_string(),
+        };
+        let detail_element: ValueDetailElement = detail_type.into();
+        assert_eq!(detail_element.id, 1);
+        assert_eq!(detail_element.municipality_id, 1);
+        assert_eq!(detail_element.municipality_name, "Test Municipality");
+        assert_eq!(detail_element.statistic_id, 1);
+        assert_eq!(detail_element.statistic_name, "Test Statistic");
+        assert_eq!(detail_element.value, Decimal::new(100, 2));
+        assert_eq!(detail_element.year, 2023);
+        assert!(detail_element.updated_at.timestamp() > 0);
+        assert!(detail_element.created_at.timestamp() > 0);
+        assert_eq!(detail_element.updated_by, "admin");
+        assert_eq!(detail_element.created_by, "admin");
     }
 }
