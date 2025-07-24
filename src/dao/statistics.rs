@@ -33,7 +33,7 @@ const QUERY_STATISTICS_LIST: &str = "SELECT id, name, inserted_at, inserted_by F
 /**
  * SQL query to retrieve a list of municipalities.
  */
-const QUERY_MUNICIPALITY_LIST: &str = "SELECT id, name, created_at, created_by FROM municipality ORDER BY id LIMIT $1 OFFSET $2";
+const QUERY_MUNICIPALITY_LIST: &str = "SELECT id, name, inserted_at, inserted_by FROM municipality ORDER BY id LIMIT $1 OFFSET $2";
 
 /**
  * SQL query to add a new statistic.
@@ -43,7 +43,7 @@ const ADD_STATISTIC: &str = "INSERT INTO statistics (id, name, inserted_by, inse
 /**
  * SQL query to add a new municipality.
  */
-const ADD_MUNICIPALITY: &str = "INSERT INTO municipality (id, name, created_by, created_at) VALUES ($1, $2, $3, now())";
+const ADD_MUNICIPALITY: &str = "INSERT INTO municipality (id, name, inserted_by, inserted_at) VALUES ($1, $2, $3, now())";
 
 
 /**
@@ -301,7 +301,10 @@ impl StatisticsDao {
 
 #[cfg(test)]
 mod test {
-    use crate::{dao::statistics::StatisticsDao, model::models::PaginationInput};
+
+    use sqlx::PgPool;
+
+    use crate::{dao::statistics::StatisticsDao, model::models::{MunicipalityAddInputType, PaginationInput, StatisticAddInputType, ValuesListInputType}};
 
     #[test]
     fn test_pagination_output_has_more() {
@@ -329,5 +332,107 @@ mod test {
         assert!(!pagination_output.has_more);
     }
 
+    /// Integration tests for the StatisticsDao methods.
+
+    #[cfg(feature = "integration-test")]
+    #[tokio::test]
+    async fn test_get_municipality_list() {
+        let pool = init_db().await;
+        let statistics_dao = StatisticsDao::new();
+        let pagination_input = PaginationInput {
+            start_index: 0,
+            page_size: 10,
+        };
+        let result = statistics_dao.get_municipality_list(&pool, pagination_input).await;
+        assert!(result.is_ok());
+    } 
+
+    #[cfg(feature = "integration-test")]
+    #[tokio::test]
+    async fn test_add_then_delete_municipality() {
+        let pool = init_db().await;
+        let mut transaction = pool.begin().await.unwrap();
+        let statistics_dao = StatisticsDao::new();
+        let municipality_add_input = MunicipalityAddInputType {
+            id: 1,
+            name: "Test Municipality".to_string(),
+            created_by: "test_user".to_string(),
+        };
+        let add_result = statistics_dao.add_municipality(&mut transaction, municipality_add_input).await;
+        assert!(add_result.is_ok());
+        let delete_result = statistics_dao.delete_municipality(&mut transaction, 1).await;
+        assert!(delete_result.is_ok());
+    } 
+
+    #[cfg(feature = "integration-test")]
+    #[tokio::test]
+    async fn test_get_statistics_list() {
+        let pool = init_db().await;
+        let statistics_dao = StatisticsDao::new();
+        let pagination_input = PaginationInput {
+            start_index: 0,
+            page_size: 10,
+        };
+        let result = statistics_dao.get_statistics_list(&pool, pagination_input).await;
+        assert!(result.is_ok());
+    } 
+
+    #[cfg(feature = "integration-test")]
+
+    #[tokio::test]
+    async fn test_add_then_delete_statistics() {
+        let pool = init_db().await;
+        let mut transaction = pool.begin().await.unwrap();
+        let statistics_dao = StatisticsDao::new();
+        let statistics_add_input = StatisticAddInputType {
+            id: 1,
+            name: "Test Statistics".to_string(),
+            created_by: "test_user".to_string(),
+        };
+        let add_result = statistics_dao.add_statistics(&mut transaction, statistics_add_input).await;
+        assert!(add_result.is_ok());
+        let delete_result = statistics_dao.delete_statistics(&mut transaction, 1).await;
+        assert!(delete_result.is_ok());
+    } 
+
+    #[cfg(feature = "integration-test")]
+    #[tokio::test]
+    async fn test_list_values() {
+        let pool = init_db().await;
+        let mut transaction = pool.begin().await.unwrap();
+        let statistics_dao = StatisticsDao::new();
+        let statistics_add_input = StatisticAddInputType {
+            id: 1,
+            name: "Test Statistics".to_string(),
+            created_by: "test_user".to_string(),
+        };
+        let add_result = statistics_dao.add_statistics(&mut transaction, statistics_add_input).await;
+        assert!(add_result.is_ok());
+        let municipality_add_input = MunicipalityAddInputType {
+            id: 1,
+            name: "Test Municipality".to_string(),
+            created_by: "test_user".to_string(),
+        };
+        let add_result = statistics_dao.add_municipality(&mut transaction, municipality_add_input).await;
+        assert!(add_result.is_ok());
+        let values_list_input = ValuesListInputType {
+            id_municipality: Some(1),
+            id_statistic: Some(1),
+            year: Some(2023),
+        };
+        let values_list_output = statistics_dao.get_values_list(&pool, PaginationInput { start_index: 0, page_size: 10 }, values_list_input).await;
+        assert!(values_list_output.is_ok());
+    } 
+
+    /**
+     * Initialize the database connection pool. 
+     */
+    #[cfg(feature = "integration-test")]
+    async fn init_db() -> PgPool {
+        dotenv::from_filename("./sqlx-postgresql-migration/.env-test").ok();
+        let pool = PgPool::connect(dotenv::var("DATABASE_URL").unwrap().as_str()).await.unwrap();
+        sqlx::migrate!("./sqlx-postgresql-migration/migrations").run(&pool).await.unwrap();
+        pool
+    }
 
 }

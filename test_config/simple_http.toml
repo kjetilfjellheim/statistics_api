@@ -7,7 +7,7 @@ workers = 50
 httpPort = 8080
 
 [database.dbType.postgresql]
-connectionString = "postgres://statistics_rw:statistics@greyhawk.forgottendonkey.com:5432/statistics"
+connectionString = ""
 maxConnections = 50
 minConnections = 50
 acquireTimeout = 6000

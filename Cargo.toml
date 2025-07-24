@@ -20,13 +20,16 @@ clap = { version = "4.5.41", features = ["derive"]} # For command line argument 
 rustls = { version = "0.23.29" } # For TLS support
 rustls-pemfile = "2.2.0" # For handling PEM files
 chrono = { version = "0.4.41", features = ["serde"] } # For date and time handling
-sqlx = { version = "0.8.6", features = [ "runtime-tokio", "postgres", "macros", "rust_decimal", "chrono" ] } # For PostgreSQL support with SQLx
+sqlx = { version = "0.8.6", features = [ "runtime-tokio", "postgres", "macros", "rust_decimal", "chrono", "migrate" ] } # For PostgreSQL support with SQLx
 rust_decimal = "1.37.2" # For decimal support in SQLx
 prometheus = "0.14.0" #For prometheus monitoring
 actix-web-prom = { version = "0.10.0", features = ["process"]} #For prometheus monitoring
 log4rs = { version = "1.3.0", features = ["rolling_file_appender", "compound_policy", "time_trigger"] } # For logging
 tracing = "0.1.41" # For structured logging
 log = "0.4.27" # For logging
+
+[dev-dependencies]
+dotenv = "0.15.0" # For loading environment variables from a .env file
 
 [profile.release]
 lto = true  # Performs “fat” LTO which attempts to perform optimizations across all crates within the dependency graph.
@@ -38,3 +41,6 @@ opt-level = 3  # Optimize for speed.
 lto = false  # No link-time optimization in development builds.
 strip = "none"  # Do not strip debug symbols.
 opt-level = 0  # No optimizations in development builds.
+
+[features]
+integration-test = []  # Feature for local development, enabling integration tests and local database connections.
