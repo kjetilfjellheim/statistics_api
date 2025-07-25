@@ -559,7 +559,7 @@ impl PaginationInput {
             return Err(ApplicationError::new(ErrorType::Validation, "Page size must be greater than zero".to_string()));
         }
         if self.page_size > MAX_PAGE_SIZE {
-            return Err(ApplicationError::new(ErrorType::Validation, format!("Page size must not exceed {}", MAX_PAGE_SIZE)));
+            return Err(ApplicationError::new(ErrorType::Validation, format!("Page size must not exceed {MAX_PAGE_SIZE}")));
         }
         Ok(self)
     }

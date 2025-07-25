@@ -1,4 +1,5 @@
 use sqlx::{Pool, Postgres};
+use tracing::instrument;
 
 use crate::{
     dao::statistics::StatisticsDao,
@@ -47,6 +48,7 @@ impl StatisticsService {
      * # Returns
      * A Result containing `MunicipalityListOutputType` or an `ApplicationError`.
      */
+    #[instrument(level = "debug", skip(self), fields(result))]
     pub async fn get_municipality_list(&self, pagination_input: PaginationInput) -> Result<MunicipalityListOutputType, ApplicationError> {
         let Some(connection_pool) = &self.connection_pool else { 
             return Err(ApplicationError::new(ErrorType::DatabaseError, "No database connection available".to_string())) 
@@ -63,6 +65,7 @@ impl StatisticsService {
      * # Returns
      * A Result indicating success or an `ApplicationError`.
      */
+    #[instrument(level = "debug", skip(self), fields(result))]
     pub async fn add_municipality(&self, municipality_add_input: MunicipalityAddInputType) -> Result<(), ApplicationError> {
         let Some(connection_pool) = &self.connection_pool else { 
             return Err(ApplicationError::new(ErrorType::DatabaseError, "No database connection available".to_string())) 
@@ -87,6 +90,7 @@ impl StatisticsService {
      * # Returns
      * A Result indicating success or an `ApplicationError`.
      */
+    #[instrument(level = "debug", skip(self), fields(result))]
     pub async fn delete_municipality(&self, municipality_id: i64) -> Result<(), ApplicationError> {
         let Some(connection_pool) = &self.connection_pool else { 
             return Err(ApplicationError::new(ErrorType::DatabaseError, "No database connection available".to_string())) 
@@ -111,6 +115,7 @@ impl StatisticsService {
      * # Returns
      * A Result containing `StatisticsListOutputType` or an `ApplicationError`.
      */
+    #[instrument(level = "debug", skip(self), fields(trace_id, result))]
     pub async fn get_statistics_list(&self, pagination_input: PaginationInput) -> Result<StatisticsListOutputType, ApplicationError> {
         let Some(connection_pool) = &self.connection_pool else { 
             return Err(ApplicationError::new(ErrorType::DatabaseError, "No database connection available".to_string())) 
@@ -127,6 +132,7 @@ impl StatisticsService {
      * # Returns
      * A Result indicating success or an `ApplicationError`.
      */
+    #[instrument(level = "debug", skip(self), fields(result))]
     pub async fn add_statistic(&self, statistics_add_input: StatisticAddInputType) -> Result<(), ApplicationError> {
         let Some(connection_pool) = &self.connection_pool else { 
             return Err(ApplicationError::new(ErrorType::DatabaseError, "No database connection available".to_string())) 
@@ -151,6 +157,7 @@ impl StatisticsService {
      * # Returns
      * A Result indicating success or an `ApplicationError`.
      */
+    #[instrument(level = "debug", skip(self), fields(result))]
     pub async fn delete_statistics(&self, statistics_id: i64) -> Result<(), ApplicationError> {
         let Some(connection_pool) = &self.connection_pool else { 
             return Err(ApplicationError::new(ErrorType::DatabaseError, "No database connection available".to_string())) 
@@ -176,6 +183,7 @@ impl StatisticsService {
      * # Returns
      * A Result containing `ValuesListOutputType` or an `ApplicationError`.
      */
+    #[instrument(level = "debug", skip(self), fields(result))]
     pub async fn get_values_list(&self, pagination_input: PaginationInput, filter_params: ValuesListInputType) -> Result<ValuesListOutputType, ApplicationError> {
         let Some(connection_pool) = &self.connection_pool else { 
             return Err(ApplicationError::new(ErrorType::DatabaseError, "No database connection available".to_string())) 
@@ -192,6 +200,7 @@ impl StatisticsService {
      * # Returns
      * A Result indicating success or an `ApplicationError`.
      */
+    #[instrument(level = "debug", skip(self), fields(result))]
     pub async fn delete_value(&self, value_id: i64) -> Result<(), ApplicationError> {
         let Some(connection_pool) = &self.connection_pool else { 
             return Err(ApplicationError::new(ErrorType::DatabaseError, "No database connection available".to_string())) 
@@ -216,6 +225,7 @@ impl StatisticsService {
      * # Returns
      * A Result indicating success or an `ApplicationError`.
      */
+    #[instrument(level = "debug", skip(self), fields(result))]
     pub async fn add_value(&self, value_add_input: ValuesAddUpdateInputType) -> Result<(), ApplicationError> {
         let Some(connection_pool) = &self.connection_pool else { 
             return Err(ApplicationError::new(ErrorType::DatabaseError, "No database connection available".to_string())) 
@@ -241,6 +251,7 @@ impl StatisticsService {
      * # Returns
      * A Result indicating success or an `ApplicationError`.
      */
+    #[instrument(level = "debug", skip(self), fields(result))]
     pub async fn update_value(&self, value_id: i64, value_add_update_input: ValuesAddUpdateInputType) -> Result<(), ApplicationError> {
         let Some(connection_pool) = &self.connection_pool else { 
             return Err(ApplicationError::new(ErrorType::DatabaseError, "No database connection available".to_string())) 

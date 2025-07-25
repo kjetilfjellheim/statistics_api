@@ -4,6 +4,7 @@ use actix_web::{FromRequest, HttpRequest};
 use actix_web_httpauth::extractors::bearer::BearerAuth;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use serde::Deserialize;
+use tracing::warn;
 
 use crate::model::apperror::{ApplicationError, ErrorType};
 
@@ -75,7 +76,7 @@ impl JwtSecurityService {
         let token_data = match jsonwebtoken::decode::<Claim>(credentials.token(), &self.decoding_key, &self.validation) {
             Ok(token_data) => token_data,
             Err(err) => {
-                log::warn!("JWT validation error: {err}");
+                warn!("JWT validation error: {err}");
                 return Err(ApplicationError::new(ErrorType::JwtAuthorization, "Unauthorized".to_string()));
             }
         };

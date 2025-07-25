@@ -1,7 +1,7 @@
 use actix_web::{
-    HttpRequest, HttpResponse, delete, post, put,
-    web::{self, Path},
+    delete, post, put, web::{self, Path}, HttpRequest, HttpResponse
 };
+use tracing::instrument;
 
 use crate::{
     api::{
@@ -17,12 +17,13 @@ use crate::{
 /**
  * Endpoint to retrieve a list of statistics types.
  */
+#[instrument(level = "debug", skip(http_request, app_state), fields(result))]
 #[post("/api/services/v1_0/statistics:list")]
 pub async fn statistics_list(
     http_request: HttpRequest,
-    _request_body: web::Json<StatisticsListRequest>,
+    request_body: web::Json<StatisticsListRequest>,
     pagination: web::Query<PaginationQuery>,
-    app_state: web::Data<AppState>,
+    app_state: web::Data<AppState>
 ) -> Result<HttpResponse, ApplicationError> {
     let _ = app_state.jwt_service.validate(&http_request)?;
     let pagination_input = PaginationInput::from(pagination).validate()?;
@@ -33,6 +34,7 @@ pub async fn statistics_list(
 /**
  * Add a new statistics type.
  */
+#[instrument(level = "debug", skip(http_request, app_state), fields(result))]
 #[post("/api/services/v1_0/statistics")]
 pub async fn statistics_add(http_request: HttpRequest, request_body: web::Json<StatisticsAddRequest>, app_state: web::Data<AppState>) -> Result<HttpResponse, ApplicationError> {
     let claim = app_state.jwt_service.validate(&http_request)?;
@@ -44,6 +46,7 @@ pub async fn statistics_add(http_request: HttpRequest, request_body: web::Json<S
 /**
  * Delete statistics type.
  */
+#[instrument(level = "debug", skip(http_request, app_state), fields(result))]
 #[delete("/api/services/v1_0/statistics/{statisticsId}")]
 pub async fn statistics_delete(path: Path<i64>, http_request: HttpRequest, app_state: web::Data<AppState>) -> Result<HttpResponse, ApplicationError> {
     let _ = app_state.jwt_service.validate(&http_request)?;
@@ -55,10 +58,11 @@ pub async fn statistics_delete(path: Path<i64>, http_request: HttpRequest, app_s
 /**
  * Endpoint to retrieve a list of municipalities.
  */
+#[instrument(level = "debug", skip(http_request, app_state), fields(result))]
 #[post("/api/services/v1_0/municipalities:list")]
 pub async fn municipalities_list(
     http_request: HttpRequest, 
-    _request_body: web::Json<StatisticsListRequest>,
+    request_body: web::Json<StatisticsListRequest>,
     pagination: web::Query<PaginationQuery>,
     app_state: web::Data<AppState>
 ) -> Result<HttpResponse, ApplicationError> {
@@ -71,6 +75,7 @@ pub async fn municipalities_list(
 /**
  * Endpoint to retrieve a list of municipalities.
  */
+#[instrument(level = "debug", skip(http_request, app_state), fields(result))]
 #[post("/api/services/v1_0/municipalities")]
 pub async fn municipalities_add(http_request: HttpRequest, request_body: web::Json<MunicipalityAddRequest>, app_state: web::Data<AppState>) -> Result<HttpResponse, ApplicationError> {
     let claim = app_state.jwt_service.validate(&http_request)?;
@@ -82,6 +87,7 @@ pub async fn municipalities_add(http_request: HttpRequest, request_body: web::Js
 /**
  * Endpoint to retrieve a list of municipalities.
  */
+#[instrument(level = "debug", skip(http_request, app_state), fields(result))]
 #[delete("/api/services/v1_0/municipalities/{municipalityId}")]
 pub async fn municipalities_delete(path: Path<i64>, http_request: HttpRequest, app_state: web::Data<AppState>) -> Result<HttpResponse, ApplicationError> {
     let _ = app_state.jwt_service.validate(&http_request)?;
@@ -93,6 +99,7 @@ pub async fn municipalities_delete(path: Path<i64>, http_request: HttpRequest, a
 /**
  * Endpoint to add values.
  */
+#[instrument(level = "debug", skip(http_request, app_state), fields(result))]
 #[post("/api/services/v1_0/values:list")]
 pub async fn values_list(
     http_request: HttpRequest,
@@ -110,6 +117,7 @@ pub async fn values_list(
 /**
  * Endpoint to add values.
  */
+#[instrument(level = "debug", skip(http_request, app_state), fields(result))]
 #[post("/api/services/v1_0/values")]
 pub async fn value_add(http_request: HttpRequest, request_body: web::Json<ValuesAddUpdateRequest>, app_state: web::Data<AppState>) -> Result<HttpResponse, ApplicationError> {
     let claim = app_state.jwt_service.validate(&http_request)?;
@@ -121,6 +129,7 @@ pub async fn value_add(http_request: HttpRequest, request_body: web::Json<Values
 /**
  * Endpoint to delete values.
  */
+#[instrument(level = "debug", skip(http_request, app_state), fields(result))]
 #[delete("/api/services/v1_0/values/{valueId}")]
 pub async fn value_delete(path: Path<i64>, http_request: HttpRequest, app_state: web::Data<AppState>) -> Result<HttpResponse, ApplicationError> {
     let _ = app_state.jwt_service.validate(&http_request)?;

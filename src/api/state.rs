@@ -39,7 +39,7 @@ mod test {
     use crate::{
         api::security::JwtSecurityService,
         dao::statistics::StatisticsDao,
-        model::config::{AppSecurity, Database, DatabaseType, Server},
+        model::config::{AppSecurity, Database, DatabaseType, LoggingConfig, Server},
     };
 
     #[test]
@@ -60,6 +60,7 @@ mod test {
         let public_key_file = "/tmp/config/jwt_public_key.pem".to_string();
         let jwt_service = JwtSecurityService::new(&public_key, "RS256").unwrap();
         let config = Config {
+            logging: LoggingConfig::default(),
             database: Database {
                 db_type: DatabaseType::Postgresql {
                     connection_string: "".to_string(),

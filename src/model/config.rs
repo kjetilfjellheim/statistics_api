@@ -12,12 +12,6 @@ pub struct ApplicationArguments {
      */
     #[arg(short, long)]
     pub config_file: String,
-
-    /**
-     * Path to the log file.
-     */
-    #[arg(short, long)]
-    pub log_file: String,
 }
 
 /**
@@ -26,6 +20,10 @@ pub struct ApplicationArguments {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
+    /**
+     * Logging configuration for the application.
+     */
+    pub logging: LoggingConfig,
     /**
      * Security configuration for the application.
      */
@@ -38,6 +36,60 @@ pub struct Config {
      * Database configuration for the application.
      */
     pub database: Database,
+}
+
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Clone, Serialize, Deserialize)]
+pub struct LoggingConfig {
+    /**
+     * Whether to log the target of the log message.
+     */
+    pub target: bool,   
+    /**
+     * Whether to log thread IDs .
+     */
+    pub thread_ids: bool,
+    /**
+     * Whether to log thread names.
+     */
+    pub thread_names: bool,
+    /**
+     * Whether to log line numbers.
+     */
+    pub line_number: bool,
+    /**
+     * Whether to log the log level.
+     */ 
+    pub level: bool,
+    /**
+     * Whether to use ANSI colors in logs.
+     */
+    pub ansi: bool,
+
+    /**
+     * Path to the log file.
+     */
+    pub file: String,
+    /**
+     * Additional directives for logging configuration.
+     */
+    pub directives: Vec<String>,
+}
+
+impl LoggingConfig {
+    #[allow(dead_code)]
+    pub fn default() -> Self {
+        LoggingConfig {
+            target: true,
+            thread_ids: true,
+            thread_names: true,
+            line_number: true,
+            level: true,
+            ansi: true,
+            file: "/tmp/statistics_api.log".to_string(),
+            directives: vec![],
+        }
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -119,6 +171,7 @@ mod test {
     #[test]
     fn test_config_serialization() {
         let config = Config {
+            logging: LoggingConfig::default(),
             database: Database {
                 db_type: DatabaseType::Postgresql {
                     connection_string: "".to_string(),

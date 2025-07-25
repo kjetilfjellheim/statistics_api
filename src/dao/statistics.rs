@@ -112,8 +112,8 @@ impl StatisticsDao {
             .await
             .map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to execute query to get municipality list: {err}")))?;
         let mut elements: Vec<MunicipalityDetailType> = results.into_iter().map(MunicipalityDetailType::from).collect();
-        let pagination_output = Self::get_pagination_output(&pagination_input, i64::try_from(elements.len()).map_err(|_| ApplicationError::new(ErrorType::Validation, "Invalid elements length".to_string()))?);
-        elements.truncate(usize::try_from(pagination_input.page_size).map_err(|_| ApplicationError::new(ErrorType::Validation, "Invalid page size".to_string()))?);
+        let pagination_output = Self::get_pagination_output(&pagination_input, i64::try_from(elements.len()).map_err(|err| ApplicationError::new(ErrorType::Validation, format!("Failed to get pagination output: {err}")))?);
+        elements.truncate(usize::try_from(pagination_input.page_size).map_err(|err| ApplicationError::new(ErrorType::Validation, format!("Failed to truncate elements: {err}")))?);
         Ok(MunicipalityListOutputType::new(elements, pagination_output))
     }
 
@@ -159,9 +159,11 @@ impl StatisticsDao {
             .await
             .map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to execute query to delete municipality: {err}")))?;
         if result.rows_affected() == 0 {
+            tracing::debug!("Municipality with ID {} not found for deletion", municipality_id);
             return Err(ApplicationError::new(ErrorType::NotFound, "Municipality not found".to_string()));
         }
         if result.rows_affected() > 1 {
+            tracing::warn!("Multiple municipalities attempted deleted. Rolled back");
             return Err(ApplicationError::new(ErrorType::Application, "Multiple municipalities attempted deleted. Rolled back".to_string()));
         }
         Ok(())
@@ -186,8 +188,8 @@ impl StatisticsDao {
             .await
             .map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to execute query to get statistics list: {err}")))?;
         let mut elements: Vec<StatisticDetailType> = results.into_iter().map(StatisticDetailType::from).collect();
-        let pagination_output = Self::get_pagination_output(&pagination_input, i64::try_from(elements.len()).map_err(|_| ApplicationError::new(ErrorType::Validation, "Invalid elements length".to_string()))?);
-        elements.truncate(usize::try_from(pagination_input.page_size).map_err(|_| ApplicationError::new(ErrorType::Validation, "Invalid page size".to_string()))?);
+        let pagination_output = Self::get_pagination_output(&pagination_input, i64::try_from(elements.len()).map_err(|err| ApplicationError::new(ErrorType::Validation, format!("Failed to get pagination output: {err}")))?);
+        elements.truncate(usize::try_from(pagination_input.page_size).map_err(|err| ApplicationError::new(ErrorType::Validation, format!("Failed to truncate elements: {err}")))?);
         Ok(StatisticsListOutputType::new(elements, pagination_output))
     }
 
@@ -233,9 +235,11 @@ impl StatisticsDao {
             .await
             .map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to execute query to delete statistics: {err}")))?;
         if result.rows_affected() == 0 {
+            tracing::debug!("Statistics with ID {} not found for deletion", statistics_id);
             return Err(ApplicationError::new(ErrorType::NotFound, "Statistics not found".to_string()));
         }
         if result.rows_affected() > 1 {
+            tracing::warn!("Multiple statistics attempted deleted. Rolled back");
             return Err(ApplicationError::new(ErrorType::Application, "Multiple statistics attempted deleted. Rolled back".to_string()));
         }
         Ok(())
@@ -259,9 +263,11 @@ impl StatisticsDao {
             .await
             .map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to execute query to delete value: {err}")))?;
         if result.rows_affected() == 0 {
+            tracing::debug!("Value with ID {} not found for deletion", value_id);
             return Err(ApplicationError::new(ErrorType::NotFound, "Value not found".to_string()));
         }
         if result.rows_affected() > 1 {
+            tracing::warn!("Multiple values attempted deleted. Rolled back");
             return Err(ApplicationError::new(ErrorType::Application, "Multiple values attempted deleted. Rolled back".to_string()));
         }
         Ok(())
@@ -290,8 +296,8 @@ impl StatisticsDao {
             .await
             .map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to execute query for values list: {err}")))?;
         let mut elements: Vec<ValueDetailType> = results.into_iter().map(ValueDetailType::from).collect();
-        let pagination_output = Self::get_pagination_output(&pagination_input, i64::try_from(elements.len()).map_err(|_| ApplicationError::new(ErrorType::Validation, "Invalid elements length".to_string()))?);
-        elements.truncate(usize::try_from(pagination_input.page_size).map_err(|_| ApplicationError::new(ErrorType::Validation, "Invalid page size".to_string()))?);
+        let pagination_output = Self::get_pagination_output(&pagination_input, i64::try_from(elements.len()).map_err(|err| ApplicationError::new(ErrorType::Validation, format!("Failed to get pagination output: {err}")))?);
+        elements.truncate(usize::try_from(pagination_input.page_size).map_err(|err| ApplicationError::new(ErrorType::Validation, format!("Failed to truncate elements: {err}")))?);
         Ok(ValuesListOutputType::new(elements, pagination_output))
     }
 
@@ -355,9 +361,11 @@ impl StatisticsDao {
                 Self::handle_database_error(err.as_database_error())
             })?;
         if result.rows_affected() == 0 {
+            tracing::debug!("Value with ID {} not found for update", value_id);
             return Err(ApplicationError::new(ErrorType::NotFound, "Value not found".to_string()));
         }
         if result.rows_affected() > 1 {
+            tracing::warn!("Multiple values attempted updated. Rolled back");
             return Err(ApplicationError::new(ErrorType::Application, "Multiple values attempted updated. Rolled back".to_string()));
         }
         Ok(())
@@ -389,6 +397,7 @@ impl StatisticsDao {
      */
     fn handle_database_error(error: Option<&dyn sqlx::error::DatabaseError>) -> ApplicationError {
         if let Some(db_error) = error {
+            tracing::warn!("Database error: {}", db_error);
             if db_error.code() == Some(Cow::Borrowed("23505")) { // Unique violation
                 return ApplicationError::new(ErrorType::ConstraintViolation, "Already exists".to_string());
             } else if db_error.code() == Some(Cow::Borrowed("23503")) { // Foreign key violation

@@ -3,9 +3,6 @@ mod dao;
 mod model;
 mod service;
 
-use std::fs::File;
-use std::io::BufReader;
-
 use crate::api::middleware;
 use crate::api::security::JwtSecurityService;
 use crate::dao::statistics::StatisticsDao;
@@ -19,11 +16,11 @@ use actix_web::middleware::from_fn;
 use actix_web::{App, HttpServer, web};
 use actix_web_prom::PrometheusMetricsBuilder;
 use clap::Parser;
-use log4rs::config::Deserializers;
 use rustls::pki_types::PrivateKeyDer;
 use rustls::{ServerConfig, SupportedProtocolVersion};
 use rustls_pemfile::{certs, pkcs8_private_keys};
 use sqlx::{Pool, Postgres, pool};
+use tracing_subscriber::EnvFilter;
 
 /**
  * Guess, but this might be the main entry point for the application.
@@ -32,9 +29,30 @@ use sqlx::{Pool, Postgres, pool};
 async fn main() -> std::io::Result<()> {
     let args = ApplicationArguments::parse();
 
-    log4rs::init_file(args.log_file, Deserializers::default()).map_err(|err| std::io::Error::other(format!("Failed to initialize logging: {err}")))?;
-
     let config = get_config(&args.config_file)?;
+
+    let mut filter = EnvFilter::try_from_default_env().map_err(|err| std::io::Error::other(format!("Failed to create logging filter: {err}")))?;
+    for directive in &config.logging.directives {
+        filter = filter.add_directive(directive.parse().map_err(|err| std::io::Error::other(format!("Failed to parse logging directive: {err}")))?);
+    }
+    let log_file = std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(&config.logging.file)
+        .map_err(|err| std::io::Error::other(format!("Failed to open log file: {err}")))?;
+
+    // Initialize logging
+    tracing_subscriber::fmt()
+        .with_writer(log_file)
+        .with_env_filter(filter)
+        .with_target(config.logging.target)
+        .with_thread_ids(config.logging.thread_ids)
+        .with_thread_names(config.logging.thread_names)
+        .with_line_number(config.logging.line_number)
+        .with_level(config.logging.level)
+        .with_ansi(config.logging.ansi)
+        .init();
+
 
     let connection_pool: Pool<Postgres> = match config.clone().database.db_type {
         DatabaseType::Postgresql { connection_string, max_connections, min_connections, acquire_timeout, acquire_slow_threshold, idle_timeout, max_lifetime } => pool::PoolOptions::new()
@@ -103,9 +121,9 @@ async fn main() -> std::io::Result<()> {
 fn ssl_builder(https_config: &HttpsConfig) -> Result<ServerConfig, ApplicationError> {
     let config_builder = ServerConfig::builder_with_protocol_versions(&get_protocol_versions());
     let cert_file =
-        &mut BufReader::new(File::open(https_config.clone().certificate_file).map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Failed to read certificate file: {err}")))?);
+        &mut std::io::BufReader::new(std::fs::File::open(https_config.clone().certificate_file).map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Failed to read certificate file: {err}")))?);
     let key_file =
-        &mut BufReader::new(File::open(https_config.clone().private_key_file).map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Failed to read private key file: {err}")))?);
+        &mut std::io::BufReader::new(std::fs::File::open(https_config.clone().private_key_file).map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Failed to read private key file: {err}")))?);
     let cert_chain = certs(cert_file).collect::<Result<Vec<_>, _>>().map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Failed to convert certificate to der: {err}")))?;
     let mut keys = pkcs8_private_keys(key_file)
         .map(|key| key.map(PrivateKeyDer::Pkcs8))

@@ -24,9 +24,8 @@ sqlx = { version = "0.8.6", features = [ "runtime-tokio", "postgres", "macros", 
 rust_decimal = "1.37.2" # For decimal support in SQLx
 prometheus = "0.14.0" #For prometheus monitoring
 actix-web-prom = { version = "0.10.0", features = ["process"]} #For prometheus monitoring
-log4rs = { version = "1.3.0", features = ["rolling_file_appender", "compound_policy", "time_trigger"] } # For logging
 tracing = "0.1.41" # For structured logging
-log = "0.4.27" # For logging
+tracing-subscriber = { version = "0.3.19", features = ["fmt", "env-filter"] } # For tracing subscriber
 
 [dev-dependencies]
 dotenv = "0.15.0" # For loading environment variables from a .env file
