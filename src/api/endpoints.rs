@@ -5,12 +5,12 @@ use actix_web::{
 
 use crate::{
     api::{
-        rest::{MunicipalityAddRequest, MunicipalityListResponse, PaginationQuery, StatisticsAddRequest, StatisticsListRequest, StatisticsListResponse, ValuesListRequest, ValuesListResponse},
+        rest::{MunicipalityAddRequest, MunicipalityListResponse, PaginationQuery, StatisticsAddRequest, StatisticsListRequest, StatisticsListResponse, ValuesAddUpdateRequest, ValuesListRequest, ValuesListResponse},
         state::AppState,
     },
     model::{
         apperror::ApplicationError,
-        models::{MunicipalityAddInputType, PaginationInput, StatisticAddInputType, StatisticsListOutputType, ValuesListInputType},
+        models::{MunicipalityAddInputType, PaginationInput, StatisticAddInputType, StatisticsListOutputType, ValuesAddUpdateInputType, ValuesListInputType},
     },
 };
 
@@ -111,7 +111,10 @@ pub async fn values_list(
  * Endpoint to add values.
  */
 #[post("/api/services/v1_0/values")]
-pub async fn value_add() -> Result<HttpResponse, ApplicationError> {
+pub async fn value_add(http_request: HttpRequest, request_body: web::Json<ValuesAddUpdateRequest>, app_state: web::Data<AppState>) -> Result<HttpResponse, ApplicationError> {
+    let claim = app_state.jwt_service.validate(&http_request)?;
+    let values_add_input = ValuesAddUpdateInputType::from((request_body, claim.name)).validate()?;
+    app_state.statistics_service.add_value(values_add_input).await?;
     Ok(HttpResponse::Created().finish())
 }
 
@@ -119,7 +122,10 @@ pub async fn value_add() -> Result<HttpResponse, ApplicationError> {
  * Endpoint to delete values.
  */
 #[delete("/api/services/v1_0/values/{valueId}")]
-pub async fn value_delete(_path: Path<u64>) -> Result<HttpResponse, ApplicationError> {
+pub async fn value_delete(path: Path<i64>, http_request: HttpRequest, app_state: web::Data<AppState>) -> Result<HttpResponse, ApplicationError> {
+    let _ = app_state.jwt_service.validate(&http_request)?;
+    let value_id = path.into_inner();
+    app_state.statistics_service.delete_value(value_id).await?;
     Ok(HttpResponse::NoContent().finish())
 }
 
@@ -127,6 +133,10 @@ pub async fn value_delete(_path: Path<u64>) -> Result<HttpResponse, ApplicationE
  * Endpoint to delete values.
  */
 #[put("/api/services/v1_0/values/{valueId}")]
-pub async fn value_update(_path: Path<u64>) -> Result<HttpResponse, ApplicationError> {
+pub async fn value_update(path: Path<i64>, http_request: HttpRequest, request_body: web::Json<ValuesAddUpdateRequest>, app_state: web::Data<AppState>) -> Result<HttpResponse, ApplicationError> {
+    let claim = app_state.jwt_service.validate(&http_request)?;
+    let value_id = path.into_inner();
+    let values_add_update_input = ValuesAddUpdateInputType::from((request_body, claim.name)).validate()?;
+    app_state.statistics_service.update_value(value_id, values_add_update_input).await?;
     Ok(HttpResponse::Ok().finish())
 }

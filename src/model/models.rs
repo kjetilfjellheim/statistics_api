@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 
 use crate::{
-    api::rest::{MunicipalityAddRequest, PaginationQuery, StatisticsAddRequest, ValuesListRequest},
+    api::rest::{MunicipalityAddRequest, PaginationQuery, StatisticsAddRequest, ValuesAddUpdateRequest, ValuesListRequest},
     dao::statistics::{QueryMunicipalityListDbResp, QueryStatisticListDbResp, QueryValuesListDbResp}, model::apperror::{ApplicationError, ErrorType},
 };
 
@@ -447,6 +447,75 @@ impl From<QueryValuesListDbResp> for ValueDetailType {
     }
 }
 
+/***************** Values:add models *********************/
+#[derive(Debug, Clone)]
+pub struct ValuesAddUpdateInputType {
+    /**
+     * The ID of the municipality.
+     */
+    pub id_municipality: i64,
+    /**
+     * The ID of the statistic.
+     */
+    pub id_statistic: i64,
+    /**
+     * The value associated with the statistic.
+     */
+    pub value: Decimal,
+    /**
+     * The year of the statistic.
+     */
+    pub year: i64,
+    /**
+     * The user who creates/updates the value.
+     */
+    pub claim_name: String,
+}
+
+impl ValuesAddUpdateInputType {
+    /**
+     * Creates a new `ValuesAddUpdateInputType`.
+     *
+     * # Arguments
+     * `id_municipality`: The ID of the municipality.
+     * `id_statistic`: The ID of the statistic.
+     * `value`: The value associated with the statistic.
+     * `year`: The year of the statistic.
+     * `created_by`: The user who creates the value.
+     *
+     * # Returns
+     * A new instance of `ValuesAddUpdateInputType`.
+     */
+    pub fn new(id_municipality: i64, id_statistic: i64, value: Decimal, year: i64, claim_name: String) -> Self {
+        ValuesAddUpdateInputType { id_municipality, id_statistic, value, year, claim_name }
+    }
+
+    /**
+     * Validates the values add input.
+     *
+     * # Returns
+     * A Result containing `ValuesAddInputType` or an `ApplicationError`.
+     */
+    pub fn validate(self) -> Result<Self, ApplicationError> {
+        if self.id_municipality < 0 {
+            return Err(ApplicationError::new(ErrorType::Validation, "Municipality ID must be non-negative".to_string()));
+        }
+        if self.id_statistic < 0 {
+            return Err(ApplicationError::new(ErrorType::Validation, "Statistic ID must be non-negative".to_string()));
+        }
+        if self.year < 0 {
+            return Err(ApplicationError::new(ErrorType::Validation, "Year must be non-negative".to_string()));
+        }
+        Ok(self)
+    }
+}
+
+impl From<(web::Json<ValuesAddUpdateRequest>, String)> for ValuesAddUpdateInputType {
+    fn from(from: (web::Json<ValuesAddUpdateRequest>, String)) -> Self {
+        ValuesAddUpdateInputType::new(from.0.municipality_id, from.0.statistic_id, from.0.value, from.0.year, from.1.clone())
+    }
+}
+
 /***************** Common models *********************/
 
 /**
@@ -595,4 +664,19 @@ mod test {
         let empty_name = MunicipalityAddInputType::new(1, "".to_string(), "user1".to_string()).validate();
         assert!(empty_name.is_err());
     }
+
+    #[test]
+    fn test_values_add_update_input_validation() {
+        let valid_input = ValuesAddUpdateInputType::new(1, 2, Decimal::new(100, 2), 2023, "user1".to_string()).validate();
+        assert!(valid_input.is_ok());   
+        
+        let negative_municipality_id = ValuesAddUpdateInputType::new(-1, 2, Decimal::new(100, 2), 2023, "user1".to_string()).validate();
+        assert!(negative_municipality_id.is_err());
+        
+        let negative_statistic_id = ValuesAddUpdateInputType::new(1, -2, Decimal::new(100, 2), 2023, "user1".to_string()).validate();
+        assert!(negative_statistic_id.is_err());
+        
+        let negative_year = ValuesAddUpdateInputType::new(1, 2, Decimal::new(100, 2), -2023, "user1".to_string()).validate();
+        assert!(negative_year.is_err());
+    }   
 }

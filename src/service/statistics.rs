@@ -4,7 +4,7 @@ use crate::{
     dao::statistics::StatisticsDao,
     model::{
         apperror::{ApplicationError, ErrorType},
-        models::{MunicipalityAddInputType, MunicipalityListOutputType, PaginationInput, StatisticAddInputType, StatisticsListOutputType, ValuesListInputType, ValuesListOutputType},
+        models::{MunicipalityAddInputType, MunicipalityListOutputType, PaginationInput, StatisticAddInputType, StatisticsListOutputType, ValuesAddUpdateInputType, ValuesListInputType, ValuesListOutputType},
     },
 };
 
@@ -181,5 +181,78 @@ impl StatisticsService {
             return Err(ApplicationError::new(ErrorType::DatabaseError, "No database connection available".to_string())) 
         };
         self.statistics_dao.get_values_list(connection_pool, pagination_input, filter_params).await
+    }
+
+    /**
+     * Deletes a value by its ID.
+     *
+     * # Arguments
+     * `statistics_id`: The ID of the statistic to be deleted.
+     *
+     * # Returns
+     * A Result indicating success or an `ApplicationError`.
+     */
+    pub async fn delete_value(&self, value_id: i64) -> Result<(), ApplicationError> {
+        let Some(connection_pool) = &self.connection_pool else { 
+            return Err(ApplicationError::new(ErrorType::DatabaseError, "No database connection available".to_string())) 
+        };
+        let mut transaction = connection_pool.begin().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to begin transaction: {err}")))?;
+        match self.statistics_dao.delete_value(&mut transaction, value_id).await {
+            Ok(()) => transaction.commit().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to commit transaction: {err}")))?,
+            Err(err) => {
+                transaction.rollback().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to rollback transaction: {err}")))?;
+                return Err(err);
+            }
+        }
+        Ok(())
+    }
+
+    /**
+     * Adds a new value.
+     *
+     * # Arguments
+     * `value_add_input`: The input type containing the details of the value to be added.
+     *
+     * # Returns
+     * A Result indicating success or an `ApplicationError`.
+     */
+    pub async fn add_value(&self, value_add_input: ValuesAddUpdateInputType) -> Result<(), ApplicationError> {
+        let Some(connection_pool) = &self.connection_pool else { 
+            return Err(ApplicationError::new(ErrorType::DatabaseError, "No database connection available".to_string())) 
+        };
+        let mut transaction = connection_pool.begin().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to begin transaction: {err}")))?;
+        match self.statistics_dao.add_value(&mut transaction, value_add_input).await {
+            Ok(_value_id) => transaction.commit().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to commit transaction: {err}")))?,
+            Err(err) => {
+                transaction.rollback().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to rollback transaction: {err}")))?;
+                return Err(err);
+            }
+        }
+        Ok(())   
+    }
+
+    /**
+     * Updates an existing value.
+     *
+     * # Arguments
+     * `value_id`: The ID of the value to be updated.
+     * `value_add_update_input`: The input type containing the updated details of the value.
+     *
+     * # Returns
+     * A Result indicating success or an `ApplicationError`.
+     */
+    pub async fn update_value(&self, value_id: i64, value_add_update_input: ValuesAddUpdateInputType) -> Result<(), ApplicationError> {
+        let Some(connection_pool) = &self.connection_pool else { 
+            return Err(ApplicationError::new(ErrorType::DatabaseError, "No database connection available".to_string())) 
+        };
+        let mut transaction = connection_pool.begin().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to begin transaction: {err}")))?;
+        match self.statistics_dao.update_value(&mut transaction, value_id, value_add_update_input).await {
+            Ok(()) => transaction.commit().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to commit transaction: {err}")))?,
+            Err(err) => {
+                transaction.rollback().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to rollback transaction: {err}")))?;
+                return Err(err);
+            }
+        }
+        Ok(())
     }
 }

@@ -7,7 +7,7 @@ use tracing::instrument;
 
 use crate::model::{
     apperror::{ApplicationError, ErrorType},
-    models::{MunicipalityAddInputType, MunicipalityDetailType, MunicipalityListOutputType, PaginationInput, PaginationOutput, StatisticAddInputType, StatisticDetailType, StatisticsListOutputType, ValueDetailType, ValuesListInputType, ValuesListOutputType},
+    models::{MunicipalityAddInputType, MunicipalityDetailType, MunicipalityListOutputType, PaginationInput, PaginationOutput, StatisticAddInputType, StatisticDetailType, StatisticsListOutputType, ValueDetailType, ValuesAddUpdateInputType, ValuesListInputType, ValuesListOutputType},
 };
 
 /**
@@ -45,7 +45,15 @@ const ADD_STATISTIC: &str = "INSERT INTO statistics (id, name, inserted_by, inse
  */
 const ADD_MUNICIPALITY: &str = "INSERT INTO municipality (id, name, inserted_by, inserted_at) VALUES ($1, $2, $3, now())";
 
+/**
+* SQL query next value id.
+*/
+const NEXT_VALUE_ID: &str = "SELECT nextval('data_id_seq')";
 
+/**
+* SQL query to delete a value.
+*/
+const DELETE_VALUE: &str = "DELETE FROM data WHERE id = $1";
 /**
 * SQL query to delete a statistic.
 */
@@ -234,6 +242,32 @@ impl StatisticsDao {
     }
 
     /**
+     * Deletes a statistic from the database by its ID.
+     *
+     * # Arguments
+     * `connection_pool`: The database connection pool.
+     * `statistics_id`: The ID of the statistic to be deleted.
+     *
+     * # Returns
+     * A result indicating success or failure of the operation.
+     */
+    #[instrument(level = "debug", skip(self, transaction), fields(result))]
+    pub async fn delete_value(&self, transaction: &mut PgConnection, value_id: i64) -> Result<(), ApplicationError> {
+        let result =sqlx::query(DELETE_VALUE)
+            .bind(value_id)
+            .execute(transaction)
+            .await
+            .map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to execute query to delete value: {err}")))?;
+        if result.rows_affected() == 0 {
+            return Err(ApplicationError::new(ErrorType::NotFound, "Value not found".to_string()));
+        }
+        if result.rows_affected() > 1 {
+            return Err(ApplicationError::new(ErrorType::Application, "Multiple values attempted deleted. Rolled back".to_string()));
+        }
+        Ok(())
+    }
+
+    /**
      * Retrieves a list of values based on the provided pagination input and filter parameters.
      *
      * # Arguments
@@ -259,6 +293,74 @@ impl StatisticsDao {
         let pagination_output = Self::get_pagination_output(&pagination_input, i64::try_from(elements.len()).map_err(|_| ApplicationError::new(ErrorType::Validation, "Invalid elements length".to_string()))?);
         elements.truncate(usize::try_from(pagination_input.page_size).map_err(|_| ApplicationError::new(ErrorType::Validation, "Invalid page size".to_string()))?);
         Ok(ValuesListOutputType::new(elements, pagination_output))
+    }
+
+    /**
+     * Adds a new value to the database.
+     *
+     * # Arguments
+     * `transaction`: The database transaction to execute the query within.
+     * `value_add_input`: The input containing details of the value to be added.
+     *
+     * # Returns
+     * A result indicating success or failure of the operation.
+     */
+    #[instrument(level = "debug", skip(self, transaction), fields(result))]
+    pub async fn add_value(&self, transaction: &mut PgConnection, value_add_input: ValuesAddUpdateInputType) -> Result<i64, ApplicationError> {
+        let next_id: (i64,) = sqlx::query_as(NEXT_VALUE_ID)
+            .fetch_one(transaction.as_mut())
+            .await
+            .map_err(|err| {
+                Self::handle_database_error(err.as_database_error())
+            })?;
+
+        sqlx::query("INSERT INTO data (id, id_municipality, id_statistic, value, year, inserted_by, updated_by, inserted_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $6, now(), now())")
+            .bind(next_id.0)
+            .bind(value_add_input.id_municipality)
+            .bind(value_add_input.id_statistic)
+            .bind(value_add_input.value)
+            .bind(value_add_input.year)
+            .bind(value_add_input.claim_name)
+            .execute(transaction)
+            .await
+            .map_err(|err| {
+                Self::handle_database_error(err.as_database_error())
+            })?;
+        Ok(next_id.0)
+    }
+
+    /**
+     * Updates an existing value in the database.
+     *
+     * # Arguments
+     * `transaction`: The database transaction to execute the query within.
+     * `value_id`: The ID of the value to be updated.
+     * `value_add_update_input`: The input containing updated details of the value.
+     *
+     * # Returns
+     * A result indicating success or failure of the operation.
+     */
+    #[instrument(level = "debug", skip(self, transaction), fields(result))]
+    pub async fn update_value(&self, transaction: &mut PgConnection, value_id: i64, value_add_update_input: ValuesAddUpdateInputType) -> Result<(), ApplicationError> {
+        let result = sqlx::query("UPDATE data SET id_municipality = $1, id_statistic = $2, value = $3, year = $4, updated_by = $5, updated_at = now() WHERE id = $6")
+            .bind(value_add_update_input.id_municipality)
+            .bind(value_add_update_input.id_statistic)
+            .bind(value_add_update_input.value)
+            .bind(value_add_update_input.year)
+            .bind(value_add_update_input.claim_name)
+            .bind(value_id)
+            .execute(transaction)
+            .await
+            .map_err(|err| {
+                Self::handle_database_error(err.as_database_error())
+            })?;
+        if result.rows_affected() == 0 {
+            return Err(ApplicationError::new(ErrorType::NotFound, "Value not found".to_string()));
+        }
+        if result.rows_affected() > 1 {
+            return Err(ApplicationError::new(ErrorType::Application, "Multiple values attempted updated. Rolled back".to_string()));
+        }
+        Ok(())
     }
 
     /**
@@ -301,10 +403,7 @@ impl StatisticsDao {
 
 #[cfg(test)]
 mod test {
-
-    use sqlx::PgPool;
-
-    use crate::{dao::statistics::StatisticsDao, model::models::{MunicipalityAddInputType, PaginationInput, StatisticAddInputType, ValuesListInputType}};
+    use crate::{dao::statistics::StatisticsDao, model::models::PaginationInput};
 
     #[test]
     fn test_pagination_output_has_more() {
@@ -332,10 +431,15 @@ mod test {
         assert!(!pagination_output.has_more);
     }
 
-    /// Integration tests for the StatisticsDao methods.
+}
 
-    #[cfg(feature = "integration-test")]
-    #[tokio::test]
+#[cfg(feature = "integration-test")]
+#[cfg(test)]
+mod integration_test {
+    use super::*;
+    use sqlx::PgPool;
+
+    #[sqlx::test]
     async fn test_get_municipality_list() {
         let pool = init_db().await;
         let statistics_dao = StatisticsDao::new();
@@ -347,8 +451,7 @@ mod test {
         assert!(result.is_ok());
     } 
 
-    #[cfg(feature = "integration-test")]
-    #[tokio::test]
+    #[sqlx::test]
     async fn test_add_then_delete_municipality() {
         let pool = init_db().await;
         let mut transaction = pool.begin().await.unwrap();
@@ -362,10 +465,10 @@ mod test {
         assert!(add_result.is_ok());
         let delete_result = statistics_dao.delete_municipality(&mut transaction, 1).await;
         assert!(delete_result.is_ok());
+        transaction.rollback().await.unwrap(); // Rollback the transaction to avoid leaving test data in the database
     } 
 
-    #[cfg(feature = "integration-test")]
-    #[tokio::test]
+    #[sqlx::test]
     async fn test_get_statistics_list() {
         let pool = init_db().await;
         let statistics_dao = StatisticsDao::new();
@@ -377,9 +480,7 @@ mod test {
         assert!(result.is_ok());
     } 
 
-    #[cfg(feature = "integration-test")]
-
-    #[tokio::test]
+    #[sqlx::test]
     async fn test_add_then_delete_statistics() {
         let pool = init_db().await;
         let mut transaction = pool.begin().await.unwrap();
@@ -393,10 +494,10 @@ mod test {
         assert!(add_result.is_ok());
         let delete_result = statistics_dao.delete_statistics(&mut transaction, 1).await;
         assert!(delete_result.is_ok());
+        transaction.rollback().await.unwrap(); // Rollback the transaction to avoid leaving test data in the database
     } 
 
-    #[cfg(feature = "integration-test")]
-    #[tokio::test]
+    #[sqlx::test]
     async fn test_list_values() {
         let pool = init_db().await;
         let mut transaction = pool.begin().await.unwrap();
@@ -424,15 +525,50 @@ mod test {
         assert!(values_list_output.is_ok());
     } 
 
+    #[sqlx::test]
+    async fn test_add_update_then_delete_value() {
+        let pool = init_db().await;
+        let mut transaction = pool.begin().await.unwrap();
+        let statistics_dao = StatisticsDao::new();
+        let statistics_add_input = StatisticAddInputType {
+            id: 1,
+            name: "Test Statistics".to_string(),
+            created_by: "test_user".to_string(),
+        };
+        let add_result = statistics_dao.add_statistics(&mut transaction, statistics_add_input).await;
+        assert!(add_result.is_ok());
+        let municipality_add_input = MunicipalityAddInputType {
+            id: 1,
+            name: "Test Municipality".to_string(),
+            created_by: "test_user".to_string(),
+        };
+        let add_result = statistics_dao.add_municipality(&mut transaction, municipality_add_input).await;
+        assert!(add_result.is_ok());
+        let value_add_input = ValuesAddUpdateInputType {
+            id_municipality: 1,
+            id_statistic: 1,
+            value: Decimal::new(100, 2),
+            year: 2023,
+            claim_name: "test_user".to_string(),
+        };
+        let add_result = statistics_dao.add_value(&mut transaction, value_add_input.clone()).await;
+        assert!(add_result.is_ok());
+
+        let update_result = statistics_dao.update_value(&mut transaction, add_result.clone().unwrap(), value_add_input).await;
+        assert!(update_result.is_ok());
+
+        let delete_result = statistics_dao.delete_value(&mut transaction, add_result.unwrap()).await;
+        assert!(delete_result.is_ok());
+        transaction.rollback().await.unwrap(); // Rollback the transaction to avoid leaving test data in the database
+    }
+
     /**
      * Initialize the database connection pool. 
      */
-    #[cfg(feature = "integration-test")]
     async fn init_db() -> PgPool {
         dotenv::from_filename("./sqlx-postgresql-migration/.env-test").ok();
         let pool = PgPool::connect(dotenv::var("DATABASE_URL").unwrap().as_str()).await.unwrap();
         sqlx::migrate!("./sqlx-postgresql-migration/migrations").run(&pool).await.unwrap();
         pool
     }
-
 }

@@ -395,6 +395,29 @@ impl From<ValueDetailType> for ValueDetailElement {
     }
 }
 
+/***************** Values:add and update models *********************/
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValuesAddUpdateRequest { 
+    /**
+     * The ID of the municipality.
+     */
+    pub municipality_id: i64,
+    /**
+     * The ID of the statistic.
+     */
+    pub statistic_id: i64,
+    /**
+     * The value of the statistic.
+     */
+    pub value: Decimal,
+    /**
+     * The year of the statistic.
+     */
+    pub year: i64,
+}
+
 /***************** Error models *********************/
 
 /**
