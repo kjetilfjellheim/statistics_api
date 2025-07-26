@@ -12,7 +12,7 @@ use crate::model::config::{AppSecurity, ApplicationArguments, DatabaseType, Http
 use crate::api::endpoints::{municipalities_add, municipalities_delete, municipalities_list, statistics_add, statistics_delete, statistics_list, value_add, value_delete, value_update, values_list};
 use crate::api::state::AppState;
 use crate::service::statistics::StatisticsService;
-use actix_web::middleware::from_fn;
+use actix_web::middleware::{from_fn, Logger};
 use actix_web::{App, HttpServer, web};
 use actix_web_prom::PrometheusMetricsBuilder;
 use clap::Parser;
@@ -38,11 +38,12 @@ async fn main() -> std::io::Result<()> {
     let log_file = std::fs::OpenOptions::new()
         .append(true)
         .create(true)
-        .open(&config.logging.file)
+        .open(&config.logging.logfile)
         .map_err(|err| std::io::Error::other(format!("Failed to open log file: {err}")))?;
 
     // Initialize logging
     tracing_subscriber::fmt()
+        .compact()
         .with_writer(log_file)
         .with_env_filter(filter)
         .with_target(config.logging.target)
@@ -51,6 +52,7 @@ async fn main() -> std::io::Result<()> {
         .with_line_number(config.logging.line_number)
         .with_level(config.logging.level)
         .with_ansi(config.logging.ansi)
+        .with_file(config.logging.file)
         .init();
 
 
@@ -84,7 +86,9 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .wrap(prometheus.clone())
             .wrap(from_fn(middleware::timing_middleware))
-            .wrap(actix_web::middleware::Logger::default())
+            .wrap(Logger::new(
+                "%a %r %s %b %{Referer}i %{User-Agent}i %{X-Trace-id}i %Dms"
+            ))
             .app_data(state.clone())
             .service(statistics_list)
             .service(statistics_add)

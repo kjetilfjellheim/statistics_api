@@ -1,19 +1,18 @@
 {
     "configurations": [
-{
-    "type": "lldb",
-    "request": "launch",
-    "name": "Cargo launch",
-    "program": "${workspaceFolder}/target/debug/statistics_api",
-    "cwd": "${workspaceFolder}",
-    "args": [
-        "--config-file",
-        "./test_config/simple_http.toml"
-        "--log-file",
-        "./test_config/logfile.yaml"
-    ],
-}
-
-
-    ]
+    {
+        "type": "lldb",
+        "request": "launch",
+        "name": "Cargo launch",
+        "program": "${workspaceFolder}/target/debug/statistics_api",
+        "cwd": "${workspaceFolder}",
+        "args": [
+            "--config-file",
+            "./test_config/simple_http.toml"
+        ],
+        "env": {
+            "RUST_BACKTRACE": "1",
+            "RUST_LOG": "debug"
+        },
+    }]
 }

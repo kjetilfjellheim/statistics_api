@@ -65,11 +65,14 @@ pub struct LoggingConfig {
      * Whether to use ANSI colors in logs.
      */
     pub ansi: bool,
-
+    /**
+     * Whether to log file.
+     */
+    pub file: bool,
     /**
      * Path to the log file.
      */
-    pub file: String,
+    pub logfile: String,
     /**
      * Additional directives for logging configuration.
      */
@@ -86,7 +89,8 @@ impl LoggingConfig {
             line_number: true,
             level: true,
             ansi: true,
-            file: "/tmp/statistics_api.log".to_string(),
+            file: true,
+            logfile: "/tmp/statistics_api.log".to_string(),
             directives: vec![],
         }
     }

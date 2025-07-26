@@ -22,6 +22,7 @@ target
 
 # Log files during development
 logs/**
+test_config/**
 
 # Environment variables file
 sqlx-postgresql-migration/.env

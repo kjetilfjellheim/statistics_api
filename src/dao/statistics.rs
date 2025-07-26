@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use sqlx::{PgConnection, Pool, Postgres};
-use tracing::instrument;
+use tracing::{instrument, Instrument};
 
 use crate::model::{
     apperror::{ApplicationError, ErrorType},
@@ -103,12 +103,14 @@ impl StatisticsDao {
      * # Returns
      * A Result containing `MunicipalityListOutputType` or an `ApplicationError`.
      */
-    #[instrument(level = "debug", skip(self, connection_pool), fields(result))]
+    #[instrument(skip(self, connection_pool), fields(result))]
     pub async fn get_municipality_list(&self, connection_pool: &Pool<Postgres>, pagination_input: PaginationInput) -> Result<MunicipalityListOutputType, ApplicationError> {
+        let span = tracing::Span::current();
         let results: Vec<QueryMunicipalityListDbResp> = sqlx::query_as(QUERY_MUNICIPALITY_LIST)
             .bind(pagination_input.page_size + 1)
             .bind(pagination_input.start_index)
             .fetch_all(connection_pool)
+            .instrument(span)
             .await
             .map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to execute query to get municipality list: {err}")))?;
         let mut elements: Vec<MunicipalityDetailType> = results.into_iter().map(MunicipalityDetailType::from).collect();
@@ -127,13 +129,15 @@ impl StatisticsDao {
      * # Returns
      * A result indicating success or failure of the operation.
      */
-    #[instrument(level = "debug", skip(self, transaction), fields(result))]
+    #[instrument(skip(self, transaction), fields(result))]
     pub async fn add_municipality(&self, transaction: &mut PgConnection, municipality_add_input: MunicipalityAddInputType) -> Result<(), ApplicationError> {
+        let span = tracing::Span::current();
         sqlx::query(ADD_MUNICIPALITY)
             .bind(municipality_add_input.id)
             .bind(municipality_add_input.name)
             .bind(municipality_add_input.created_by)
             .execute(transaction)
+            .instrument(span)
             .await
             .map_err(|err| {
                 Self::handle_database_error(err.as_database_error())
@@ -151,11 +155,13 @@ impl StatisticsDao {
      * # Returns
      * A result indicating success or failure of the operation.
      */
-    #[instrument(level = "debug", skip(self, transaction), fields(result))]
+    #[instrument(skip(self, transaction), fields(result))]
     pub async fn delete_municipality(&self, transaction: &mut PgConnection, municipality_id: i64) -> Result<(), ApplicationError> {
-        let result =sqlx::query(DELETE_MUNICIPALITY)
+        let span = tracing::Span::current();
+        let result = sqlx::query(DELETE_MUNICIPALITY)
             .bind(municipality_id)
             .execute(transaction)
+            .instrument(span)
             .await
             .map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to execute query to delete municipality: {err}")))?;
         if result.rows_affected() == 0 {
@@ -179,12 +185,14 @@ impl StatisticsDao {
      * # Returns
      * A Result containing `StatisticsListOutputType` or an `ApplicationError`.
      */
-    #[instrument(level = "debug", skip(self, connection_pool), fields(result))]
+    #[instrument(skip(self, connection_pool), fields(result))]
     pub async fn get_statistics_list(&self, connection_pool: &Pool<Postgres>, pagination_input: PaginationInput) -> Result<StatisticsListOutputType, ApplicationError> {
+        let span = tracing::Span::current();
         let results: Vec<QueryStatisticListDbResp> = sqlx::query_as(QUERY_STATISTICS_LIST)
             .bind(pagination_input.page_size + 1)
             .bind(pagination_input.start_index)
             .fetch_all(connection_pool)
+            .instrument(span.clone())
             .await
             .map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to execute query to get statistics list: {err}")))?;
         let mut elements: Vec<StatisticDetailType> = results.into_iter().map(StatisticDetailType::from).collect();
@@ -203,13 +211,15 @@ impl StatisticsDao {
      * # Returns
      * A result indicating success or failure of the operation.
      */
-    #[instrument(level = "debug", skip(self, transaction), fields(result))]
+    #[instrument(skip(self, transaction), fields(result))]
     pub async fn add_statistics(&self, transaction: &mut PgConnection, statistics_add_input: StatisticAddInputType) -> Result<(), ApplicationError> {
+        let span = tracing::Span::current();
         sqlx::query(ADD_STATISTIC)
             .bind(statistics_add_input.id)
             .bind(statistics_add_input.name)
             .bind(statistics_add_input.created_by)
             .execute(transaction)
+            .instrument(span)
             .await
             .map_err(|err| {
                 Self::handle_database_error(err.as_database_error())
@@ -227,11 +237,13 @@ impl StatisticsDao {
      * # Returns
      * A result indicating success or failure of the operation.
      */
-    #[instrument(level = "debug", skip(self, transaction), fields(result))]
+    #[instrument(skip(self, transaction), fields(result))]
     pub async fn delete_statistics(&self, transaction: &mut PgConnection, statistics_id: i64) -> Result<(), ApplicationError> {
-        let result =sqlx::query(DELETE_STATISTIC)
+        let span = tracing::Span::current();
+        let result = sqlx::query(DELETE_STATISTIC)
             .bind(statistics_id)
             .execute(transaction)
+            .instrument(span.clone())
             .await
             .map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to execute query to delete statistics: {err}")))?;
         if result.rows_affected() == 0 {
@@ -255,11 +267,13 @@ impl StatisticsDao {
      * # Returns
      * A result indicating success or failure of the operation.
      */
-    #[instrument(level = "debug", skip(self, transaction), fields(result))]
+    #[instrument(skip(self, transaction), fields(result))]
     pub async fn delete_value(&self, transaction: &mut PgConnection, value_id: i64) -> Result<(), ApplicationError> {
-        let result =sqlx::query(DELETE_VALUE)
+        let span = tracing::Span::current();
+        let result = sqlx::query(DELETE_VALUE)
             .bind(value_id)
             .execute(transaction)
+            .instrument(span.clone())
             .await
             .map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to execute query to delete value: {err}")))?;
         if result.rows_affected() == 0 {
@@ -284,8 +298,9 @@ impl StatisticsDao {
      * # Returns
      * A result containing the `ValuesListOutputType` with the retrieved values and pagination information.
      */
-    #[instrument(level = "debug", skip(self, connection_pool), fields(result))]
+    #[instrument(skip(self, connection_pool), fields(result))]
     pub async fn get_values_list(&self, connection_pool: &Pool<Postgres>, pagination_input: PaginationInput, filter_params: ValuesListInputType) -> Result<ValuesListOutputType, ApplicationError> {
+        let span = tracing::Span::current();
         let results: Vec<QueryValuesListDbResp> = sqlx::query_as(QUERY_VALUES_LIST)
             .bind(filter_params.id_municipality)
             .bind(filter_params.id_statistic)
@@ -293,6 +308,7 @@ impl StatisticsDao {
             .bind(pagination_input.page_size + 1)
             .bind(pagination_input.start_index)
             .fetch_all(connection_pool)
+            .instrument(span.clone())
             .await
             .map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to execute query for values list: {err}")))?;
         let mut elements: Vec<ValueDetailType> = results.into_iter().map(ValueDetailType::from).collect();
@@ -311,10 +327,12 @@ impl StatisticsDao {
      * # Returns
      * A result indicating success or failure of the operation.
      */
-    #[instrument(level = "debug", skip(self, transaction), fields(result))]
+    #[instrument(skip(self, transaction), fields(result))]
     pub async fn add_value(&self, transaction: &mut PgConnection, value_add_input: ValuesAddUpdateInputType) -> Result<i64, ApplicationError> {
+        let span = tracing::Span::current();
         let next_id: (i64,) = sqlx::query_as(NEXT_VALUE_ID)
             .fetch_one(transaction.as_mut())
+            .instrument(span.clone())
             .await
             .map_err(|err| {
                 Self::handle_database_error(err.as_database_error())
@@ -328,6 +346,7 @@ impl StatisticsDao {
             .bind(value_add_input.year)
             .bind(value_add_input.claim_name)
             .execute(transaction)
+            .instrument(span.clone())
             .await
             .map_err(|err| {
                 Self::handle_database_error(err.as_database_error())
@@ -346,8 +365,9 @@ impl StatisticsDao {
      * # Returns
      * A result indicating success or failure of the operation.
      */
-    #[instrument(level = "debug", skip(self, transaction), fields(result))]
+    #[instrument(skip(self, transaction), fields(result))]
     pub async fn update_value(&self, transaction: &mut PgConnection, value_id: i64, value_add_update_input: ValuesAddUpdateInputType) -> Result<(), ApplicationError> {
+        let span = tracing::Span::current();
         let result = sqlx::query("UPDATE data SET id_municipality = $1, id_statistic = $2, value = $3, year = $4, updated_by = $5, updated_at = now() WHERE id = $6")
             .bind(value_add_update_input.id_municipality)
             .bind(value_add_update_input.id_statistic)
@@ -356,12 +376,13 @@ impl StatisticsDao {
             .bind(value_add_update_input.claim_name)
             .bind(value_id)
             .execute(transaction)
+            .instrument(span.clone())
             .await
             .map_err(|err| {
                 Self::handle_database_error(err.as_database_error())
             })?;
         if result.rows_affected() == 0 {
-            tracing::debug!("Value with ID {} not found for update", value_id);
+            tracing::debug!("Value with id {} not found for update", value_id);
             return Err(ApplicationError::new(ErrorType::NotFound, "Value not found".to_string()));
         }
         if result.rows_affected() > 1 {
@@ -396,15 +417,19 @@ impl StatisticsDao {
      * An `ApplicationError` corresponding to the database error.
      */
     fn handle_database_error(error: Option<&dyn sqlx::error::DatabaseError>) -> ApplicationError {
-        if let Some(db_error) = error {
-            tracing::warn!("Database error: {}", db_error);
+        if let Some(db_error) = error {            
             if db_error.code() == Some(Cow::Borrowed("23505")) { // Unique violation
+                tracing::info!("Database error: {}", db_error);
                 return ApplicationError::new(ErrorType::ConstraintViolation, "Already exists".to_string());
             } else if db_error.code() == Some(Cow::Borrowed("23503")) { // Foreign key violation
+                tracing::info!("Database error: {}", db_error);
                 return ApplicationError::new(ErrorType::ConstraintViolation, "Missing parent value".to_string());
             } else if db_error.code() == Some(Cow::Borrowed("22001")) { // Value too long
+                tracing::info!("Database error: {}", db_error);
                 return ApplicationError::new(ErrorType::Validation, "Value too long".to_string());                
-            }
+            } 
+            tracing::error!("Unhandled database error: {}", db_error);
+            return ApplicationError::new(ErrorType::DatabaseError, "Unhandled database error".to_string());
         }
         ApplicationError::new(ErrorType::DatabaseError, "Failed to execute database operation".to_string())
     }
