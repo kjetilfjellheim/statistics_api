@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use sqlx::{Pool, Postgres};
 use tracing::{instrument, Instrument};
 
@@ -20,7 +22,7 @@ pub struct StatisticsService {
     /**
      * Optional connection pool for database operations. Optional for test purposes until we have a better way to mock the database.
      */
-    connection_pool: Option<Pool<Postgres>>,
+    connection_pool: Option<Arc<Pool<Postgres>>>,
 }
 
 impl StatisticsService {
@@ -35,7 +37,7 @@ impl StatisticsService {
      * # Returns
      * A new instance of `StatisticsService`.
      */
-    pub fn new(statistics_dao: StatisticsDao, connection_pool: Option<Pool<Postgres>>) -> Self {
+    pub fn new(statistics_dao: StatisticsDao, connection_pool: Option<Arc<Pool<Postgres>>>) -> Self {
         StatisticsService { statistics_dao, connection_pool }
     }
 

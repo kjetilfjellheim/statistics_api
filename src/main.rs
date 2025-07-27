@@ -3,6 +3,10 @@ mod dao;
 mod model;
 mod service;
 
+use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
+
 use crate::api::middleware;
 use crate::api::security::JwtSecurityService;
 use crate::dao::statistics::StatisticsDao;
@@ -14,8 +18,9 @@ use crate::api::state::AppState;
 use crate::service::statistics::StatisticsService;
 use actix_web::middleware::{from_fn, Logger};
 use actix_web::{App, HttpServer, web};
-use actix_web_prom::PrometheusMetricsBuilder;
+use actix_web_prom::{PrometheusMetrics, PrometheusMetricsBuilder};
 use clap::Parser;
+use prometheus::IntGauge;
 use rustls::pki_types::PrivateKeyDer;
 use rustls::{ServerConfig, SupportedProtocolVersion};
 use rustls_pemfile::{certs, pkcs8_private_keys};
@@ -55,7 +60,6 @@ async fn main() -> std::io::Result<()> {
         .with_file(config.logging.file)
         .init();
 
-
     let connection_pool: Pool<Postgres> = match config.clone().database.db_type {
         DatabaseType::Postgresql { connection_string, max_connections, min_connections, acquire_timeout, acquire_slow_threshold, idle_timeout, max_lifetime } => pool::PoolOptions::new()
             .max_connections(max_connections)
@@ -68,11 +72,12 @@ async fn main() -> std::io::Result<()> {
             .await
             .map_err(|err| std::io::Error::other(format!("Failed to create database pool: {err}")))?,
     };
+    let connection_pool = Arc::new(connection_pool);
 
     let jwt_service = get_jwt_service(&config.security)?;
 
     let statistics_dao = StatisticsDao::new();
-    let statistics_service = StatisticsService::new(statistics_dao, Some(connection_pool));
+    let statistics_service = StatisticsService::new(statistics_dao, Some(connection_pool.clone()));
 
     let state = web::Data::new(AppState::new(jwt_service.clone(), config.clone(), statistics_service));
 
@@ -81,6 +86,19 @@ async fn main() -> std::io::Result<()> {
         .mask_unmatched_patterns("UNKNOWN")
         .build()
         .map_err(|err| std::io::Error::other(format!("Failed to create Prometheus metrics: {err}")))?;
+
+    // Initialize custom metrics
+    let max_connections_gauge = IntGauge::new("max_connections", "Connection pool maximum").unwrap();
+    let min_connections_gauge = IntGauge::new("min_connections", "Connection pool minimum").unwrap();
+    let active_connections_gauge = IntGauge::new("active_connections", "Connection pool active").unwrap();
+    let idle_connections_gauge = IntGauge::new("idle_connections", "Connection pool idle").unwrap();
+    //Register custom prometheus metrics
+    register_promethius_metrics(&prometheus, &max_connections_gauge);
+    register_promethius_metrics(&prometheus, &min_connections_gauge);
+    register_promethius_metrics(&prometheus, &active_connections_gauge);
+    register_promethius_metrics(&prometheus, &idle_connections_gauge);
+
+    gather_db_metrics(max_connections_gauge, min_connections_gauge, active_connections_gauge, idle_connections_gauge, connection_pool);
 
     let server_init = HttpServer::new(move || {
         App::new()
@@ -111,6 +129,41 @@ async fn main() -> std::io::Result<()> {
     };
 
     server_init.workers(config.server.workers).run().await
+}
+
+/**
+ * Registers custom Prometheus metrics.
+ *
+ * #Arguments
+ * `prometheus_metrics`: The Prometheus metrics instance to register the gauge with.
+ * `gauge`: The gauge to register.
+ */
+fn register_promethius_metrics(prometheus_metrics: &PrometheusMetrics, gauge: &IntGauge) {
+    prometheus_metrics
+        .registry
+        .register(Box::new(gauge.clone()))
+        .unwrap();
+}
+
+/**
+ * Gathers database metrics in a separate thread.
+ *
+ * #Arguments
+ * `max_connections_gauge`: Gauge for maximum connections.
+ * `min_connections_gauge`: Gauge for minimum connections.
+ * `active_connections_gauge`: Gauge for active connections.
+ * `idle_connections_gauge`: Gauge for idle connections.
+ * `connection_pool`: The connection pool to gather metrics from.
+ */
+fn gather_db_metrics(max_connections_gauge: IntGauge, min_connections_gauge: IntGauge, active_connections_gauge: IntGauge, idle_connections_gauge: IntGauge, connection_pool: Arc<Pool<Postgres>>) {
+    thread::spawn(move || loop {
+        max_connections_gauge.set(i64::from(connection_pool.options().get_max_connections()));
+        min_connections_gauge.set(i64::from(connection_pool.options().get_min_connections()));
+        active_connections_gauge.set(i64::from(connection_pool.size()));
+        #[allow(clippy::cast_possible_wrap)]
+        idle_connections_gauge.set(connection_pool.num_idle() as i64);
+        thread::sleep(Duration::from_secs(1));
+    });
 }
 
 /**
