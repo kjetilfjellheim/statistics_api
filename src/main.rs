@@ -88,15 +88,19 @@ async fn main() -> std::io::Result<()> {
         .map_err(|err| std::io::Error::other(format!("Failed to create Prometheus metrics: {err}")))?;
 
     // Initialize custom metrics
-    let max_connections_gauge = IntGauge::new("max_connections", "Connection pool maximum").unwrap();
-    let min_connections_gauge = IntGauge::new("min_connections", "Connection pool minimum").unwrap();
-    let active_connections_gauge = IntGauge::new("active_connections", "Connection pool active").unwrap();
-    let idle_connections_gauge = IntGauge::new("idle_connections", "Connection pool idle").unwrap();
+    let max_connections_gauge = IntGauge::new("max_connections", "Connection pool maximum")
+        .map_err(|err| std::io::Error::other(format!("Failed to create max_connections gauge: {err}")))?;
+    let min_connections_gauge = IntGauge::new("min_connections", "Connection pool minimum")
+        .map_err(|err| std::io::Error::other(format!("Failed to create min_connections gauge: {err}")))?;
+    let active_connections_gauge = IntGauge::new("active_connections", "Connection pool active")
+        .map_err(|err| std::io::Error::other(format!("Failed to create active_connections gauge: {err}")))?;
+    let idle_connections_gauge = IntGauge::new("idle_connections", "Connection pool idle")
+        .map_err(|err| std::io::Error::other(format!("Failed to create idle_connections gauge: {err}")))?;
     //Register custom prometheus metrics
-    register_promethius_metrics(&prometheus, &max_connections_gauge);
-    register_promethius_metrics(&prometheus, &min_connections_gauge);
-    register_promethius_metrics(&prometheus, &active_connections_gauge);
-    register_promethius_metrics(&prometheus, &idle_connections_gauge);
+    register_promethius_metrics(&prometheus, &max_connections_gauge)?;
+    register_promethius_metrics(&prometheus, &min_connections_gauge)?;
+    register_promethius_metrics(&prometheus, &active_connections_gauge)?;
+    register_promethius_metrics(&prometheus, &idle_connections_gauge)?;
 
     gather_db_metrics(max_connections_gauge, min_connections_gauge, active_connections_gauge, idle_connections_gauge, connection_pool);
 
@@ -138,11 +142,12 @@ async fn main() -> std::io::Result<()> {
  * `prometheus_metrics`: The Prometheus metrics instance to register the gauge with.
  * `gauge`: The gauge to register.
  */
-fn register_promethius_metrics(prometheus_metrics: &PrometheusMetrics, gauge: &IntGauge) {
+fn register_promethius_metrics(prometheus_metrics: &PrometheusMetrics, gauge: &IntGauge) -> Result<(), std::io::Error> {
     prometheus_metrics
         .registry
         .register(Box::new(gauge.clone()))
-        .unwrap();
+        .map_err(|err| std::io::Error::other(format!("Failed to register Prometheus gauge: {err}")))?;
+    Ok(())
 }
 
 /**
