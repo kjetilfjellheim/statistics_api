@@ -77,9 +77,9 @@ async fn main() -> std::io::Result<()> {
     let jwt_service = get_jwt_service(&config.security)?;
 
     let statistics_dao = StatisticsDao::new();
-    let statistics_service = StatisticsService::new(statistics_dao, Some(connection_pool.clone()));
+    let statistics_service = StatisticsService::new(statistics_dao, connection_pool.clone());
 
-    let state = web::Data::new(AppState::new(jwt_service.clone(), config.clone(), statistics_service));
+    let state = web::Data::new(AppState::new(jwt_service.clone(),statistics_service));
 
     let prometheus = PrometheusMetricsBuilder::new("")
         .endpoint("/metrics/prometheus")

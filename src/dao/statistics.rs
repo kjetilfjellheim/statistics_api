@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
-use sqlx::{PgConnection, Pool, Postgres};
+use sqlx::PgConnection;
 use tracing::{instrument, Instrument};
 
 use crate::model::{
@@ -104,7 +104,7 @@ impl StatisticsDao {
      * A Result containing `MunicipalityListOutputType` or an `ApplicationError`.
      */
     #[instrument(skip(self, connection_pool), fields(result))]
-    pub async fn get_municipality_list(&self, connection_pool: &Pool<Postgres>, pagination_input: PaginationInput) -> Result<MunicipalityListOutputType, ApplicationError> {
+    pub async fn get_municipality_list(&self, connection_pool: &mut PgConnection, pagination_input: PaginationInput) -> Result<MunicipalityListOutputType, ApplicationError> {
         let span = tracing::Span::current();
         let results: Vec<QueryMunicipalityListDbResp> = sqlx::query_as(QUERY_MUNICIPALITY_LIST)
             .bind(pagination_input.page_size + 1)
@@ -186,7 +186,7 @@ impl StatisticsDao {
      * A Result containing `StatisticsListOutputType` or an `ApplicationError`.
      */
     #[instrument(skip(self, connection_pool), fields(result))]
-    pub async fn get_statistics_list(&self, connection_pool: &Pool<Postgres>, pagination_input: PaginationInput) -> Result<StatisticsListOutputType, ApplicationError> {
+    pub async fn get_statistics_list(&self, connection_pool: &mut PgConnection, pagination_input: PaginationInput) -> Result<StatisticsListOutputType, ApplicationError> {
         let span = tracing::Span::current();
         let results: Vec<QueryStatisticListDbResp> = sqlx::query_as(QUERY_STATISTICS_LIST)
             .bind(pagination_input.page_size + 1)
@@ -299,7 +299,7 @@ impl StatisticsDao {
      * A result containing the `ValuesListOutputType` with the retrieved values and pagination information.
      */
     #[instrument(skip(self, connection_pool), fields(result))]
-    pub async fn get_values_list(&self, connection_pool: &Pool<Postgres>, pagination_input: PaginationInput, filter_params: ValuesListInputType) -> Result<ValuesListOutputType, ApplicationError> {
+    pub async fn get_values_list(&self, connection_pool: &mut PgConnection, pagination_input: PaginationInput, filter_params: ValuesListInputType) -> Result<ValuesListOutputType, ApplicationError> {
         let span = tracing::Span::current();
         let results: Vec<QueryValuesListDbResp> = sqlx::query_as(QUERY_VALUES_LIST)
             .bind(filter_params.id_municipality)
@@ -418,14 +418,13 @@ impl StatisticsDao {
      */
     fn handle_database_error(error: Option<&dyn sqlx::error::DatabaseError>) -> ApplicationError {
         if let Some(db_error) = error {            
-            if db_error.code() == Some(Cow::Borrowed("23505")) { // Unique violation
-                tracing::info!("Database error: {}", db_error);
+            tracing::debug!("Database error: {}", db_error);
+            tracing::info!("Add/Update error: {:?}", db_error.code());
+            if db_error.code() == Some(Cow::Borrowed("23505")) { // Unique violation   
                 return ApplicationError::new(ErrorType::ConstraintViolation, "Already exists".to_string());
             } else if db_error.code() == Some(Cow::Borrowed("23503")) { // Foreign key violation
-                tracing::info!("Database error: {}", db_error);
                 return ApplicationError::new(ErrorType::ConstraintViolation, "Missing parent value".to_string());
             } else if db_error.code() == Some(Cow::Borrowed("22001")) { // Value too long
-                tracing::info!("Database error: {}", db_error);
                 return ApplicationError::new(ErrorType::Validation, "Value too long".to_string());                
             } 
             tracing::error!("Unhandled database error: {}", db_error);
@@ -481,7 +480,8 @@ mod integration_test {
             start_index: 0,
             page_size: 10,
         };
-        let result = statistics_dao.get_municipality_list(&pool, pagination_input).await;
+        let mut connection = pool.acquire().await.unwrap();
+        let result = statistics_dao.get_municipality_list(&mut connection, pagination_input).await;
         assert!(result.is_ok());
     } 
 
@@ -510,7 +510,8 @@ mod integration_test {
             start_index: 0,
             page_size: 10,
         };
-        let result = statistics_dao.get_statistics_list(&pool, pagination_input).await;
+        let mut connection = pool.acquire().await.unwrap();
+        let result = statistics_dao.get_statistics_list(&mut connection, pagination_input).await;
         assert!(result.is_ok());
     } 
 
@@ -555,7 +556,8 @@ mod integration_test {
             id_statistic: Some(1),
             year: Some(2023),
         };
-        let values_list_output = statistics_dao.get_values_list(&pool, PaginationInput { start_index: 0, page_size: 10 }, values_list_input).await;
+        let mut connection = pool.acquire().await.unwrap();
+        let values_list_output = statistics_dao.get_values_list(&mut connection, PaginationInput { start_index: 0, page_size: 10 }, values_list_input).await;
         assert!(values_list_output.is_ok());
     } 
 
