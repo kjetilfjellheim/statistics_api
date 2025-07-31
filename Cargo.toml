@@ -15,9 +15,9 @@ serde = { version = "1.0.219", features = ["derive"] } # For serialization/deser
 serde_json = "1.0.141" # For JSON serialization/deserialization
 futures-util = "0.3.31" # For async utilities
 jsonwebtoken = "9.3.1" # For JWT handling
-toml = "0.9.2" # For reading configuration files
-clap = { version = "4.5.41", features = ["derive"]} # For command line argument parsing
-rustls = { version = "0.23.29" } # For TLS support
+toml = "0.9.4" # For reading configuration files
+clap = { version = "4.5.42", features = ["derive"]} # For command line argument parsing
+rustls = { version = "0.23.31" } # For TLS support
 rustls-pemfile = "2.2.0" # For handling PEM files
 chrono = { version = "0.4.41", features = ["serde"] } # For date and time handling
 sqlx = { version = "0.8.6", features = [ "runtime-tokio", "postgres", "macros", "rust_decimal", "chrono", "migrate" ] } # For PostgreSQL support with SQLx
@@ -27,6 +27,7 @@ actix-web-prom = { version = "0.10.0", features = ["process"]} #For prometheus m
 tracing = "0.1.41" # For structured logging
 tracing-subscriber = { version = "0.3.19", features = ["fmt", "env-filter"] } # For tracing subscriber
 uuid = { version = "1.17.0", features = ["v4"] } # For generating unique identifiers when trace id is missing.
+sha2 = "0.10.9" # For SHA-256 hashing
 
 [dev-dependencies]
 dotenv = "0.15.0" # For loading environment variables from a .env file

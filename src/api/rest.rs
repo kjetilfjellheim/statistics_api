@@ -456,7 +456,7 @@ impl ResponseError for ApplicationError {
 */
 fn get_statuscode(application_error: &ErrorType) -> StatusCode {
     match application_error {
-        ErrorType::Validation => StatusCode::BAD_REQUEST,
+        ErrorType::Validation | ErrorType::DigestVerification => StatusCode::BAD_REQUEST,
         ErrorType::JwtAuthorization => StatusCode::UNAUTHORIZED,
         ErrorType::Initialization | ErrorType::DatabaseError | ErrorType::Application => StatusCode::INTERNAL_SERVER_ERROR,
         ErrorType::NotFound => StatusCode::NOT_FOUND,
@@ -482,6 +482,7 @@ fn get_error_code(application_error: &ErrorType) -> u16 {
         ErrorType::NotFound => 1005,
         ErrorType::Application => 1006,
         ErrorType::ConstraintViolation => 1007,
+        ErrorType::DigestVerification => 1008,
     }
 }
 
