@@ -166,7 +166,7 @@ pub async fn value_update(path: Path<i64>, http_request: HttpRequest, request_bo
  * If the trace ID is not present, a new UUID is generated.
  */
 fn get_trace_id(http_request: &HttpRequest) -> String {
-    http_request.headers().get("X-Trace-ID")
+    http_request.headers().get("X-Request-ID")
         .and_then(|v| v.to_str().ok().map(std::string::ToString::to_string))
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
 }
@@ -180,7 +180,7 @@ mod test {
     #[actix_web::test]
     async fn test_get_trace_id_exists() {
         let request = TestRequest::default()
-            .insert_header(("X-Trace-ID", "test"))
+            .insert_header(("X-Request-ID", "test"))
             .to_http_request();
         let trace_id = get_trace_id(&request);
         assert_eq!(trace_id, "test");
