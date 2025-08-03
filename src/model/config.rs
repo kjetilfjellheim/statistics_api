@@ -44,7 +44,7 @@ pub struct LoggingConfig {
     /**
      * Whether to log the target of the log message.
      */
-    pub target: bool,   
+    pub target: bool,
     /**
      * Whether to log thread IDs .
      */
@@ -59,7 +59,7 @@ pub struct LoggingConfig {
     pub line_number: bool,
     /**
      * Whether to log the log level.
-     */ 
+     */
     pub level: bool,
     /**
      * Whether to use ANSI colors in logs.
@@ -82,17 +82,7 @@ pub struct LoggingConfig {
 impl LoggingConfig {
     #[allow(dead_code)]
     pub fn default() -> Self {
-        LoggingConfig {
-            target: true,
-            thread_ids: true,
-            thread_names: true,
-            line_number: true,
-            level: true,
-            ansi: true,
-            file: true,
-            logfile: "/tmp/statistics_api.log".to_string(),
-            directives: vec![],
-        }
+        LoggingConfig { target: true, thread_ids: true, thread_names: true, line_number: true, level: true, ansi: true, file: true, logfile: "/tmp/statistics_api.log".to_string(), directives: vec![] }
     }
 }
 

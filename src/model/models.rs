@@ -4,7 +4,8 @@ use rust_decimal::Decimal;
 
 use crate::{
     api::rest::{MunicipalityAddRequest, PaginationQuery, StatisticsAddRequest, ValuesAddUpdateRequest, ValuesListRequest},
-    dao::statistics::{QueryMunicipalityListDbResp, QueryStatisticListDbResp, QueryValuesListDbResp}, model::apperror::{ApplicationError, ErrorType},
+    dao::statistics::{QueryMunicipalityListDbResp, QueryStatisticListDbResp, QueryValuesListDbResp},
+    model::apperror::{ApplicationError, ErrorType},
 };
 
 const MAX_PAGE_SIZE: i64 = 100;
@@ -301,7 +302,6 @@ pub struct ValuesListInputType {
 }
 
 impl ValuesListInputType {
-
     /**
      * Creates a new `ValuesListInputType`.
      *
@@ -351,7 +351,6 @@ impl From<web::Json<ValuesListRequest>> for ValuesListInputType {
     fn from(request: web::Json<ValuesListRequest>) -> Self {
         ValuesListInputType { id_municipality: request.municipality_id, id_statistic: request.statistic_id, year: request.year }
     }
-
 }
 
 /**
@@ -595,13 +594,13 @@ pub struct PaginationOutput {
 
 impl PaginationOutput {
     /**
-    * Creates a new `PaginationOutput`.
-    *
-    * # Arguments
-    * `start_index`: The starting index for pagination.
-    * `page_size`: The number of items per page.
-    * `has_more`: Indicates if there are more items available.
-    */
+     * Creates a new `PaginationOutput`.
+     *
+     * # Arguments
+     * `start_index`: The starting index for pagination.
+     * `page_size`: The number of items per page.
+     * `has_more`: Indicates if there are more items available.
+     */
     pub fn new(start_index: i64, page_size: i64, has_more: bool) -> Self {
         PaginationOutput { start_index, page_size, has_more }
     }
@@ -623,7 +622,7 @@ mod test {
         assert!(zero_page_size.is_err());
 
         let large_page_size = PaginationInput::new(0, 101).validate();
-        assert!(large_page_size.is_err());  
+        assert!(large_page_size.is_err());
     }
 
     #[test]
@@ -638,7 +637,7 @@ mod test {
         assert!(empty_name.is_err());
     }
 
-    #[test]    
+    #[test]
     fn test_values_list_input_validation() {
         let valid_input = ValuesListInputType::new(Some(1), Some(2), Some(2023)).validate();
         assert!(valid_input.is_ok());
@@ -668,15 +667,15 @@ mod test {
     #[test]
     fn test_values_add_update_input_validation() {
         let valid_input = ValuesAddUpdateInputType::new(1, 2, Decimal::new(100, 2), 2023, "user1".to_string()).validate();
-        assert!(valid_input.is_ok());   
-        
+        assert!(valid_input.is_ok());
+
         let negative_municipality_id = ValuesAddUpdateInputType::new(-1, 2, Decimal::new(100, 2), 2023, "user1".to_string()).validate();
         assert!(negative_municipality_id.is_err());
-        
+
         let negative_statistic_id = ValuesAddUpdateInputType::new(1, -2, Decimal::new(100, 2), 2023, "user1".to_string()).validate();
         assert!(negative_statistic_id.is_err());
-        
+
         let negative_year = ValuesAddUpdateInputType::new(1, 2, Decimal::new(100, 2), -2023, "user1".to_string()).validate();
         assert!(negative_year.is_err());
-    }   
+    }
 }

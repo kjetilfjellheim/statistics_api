@@ -3,7 +3,7 @@ use std::fmt;
 /**
  * Represents the type of error that can occur within the application.
  */
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ErrorType {
     Initialization,
     JwtAuthorization,
@@ -13,6 +13,7 @@ pub enum ErrorType {
     ConstraintViolation,
     Validation,
     DigestVerification,
+    SignatureVerification,
 }
 
 /**
@@ -56,8 +57,8 @@ impl fmt::Display for ApplicationError {
 
 #[cfg(test)]
 mod test {
-    
-use super::*;
+
+    use super::*;
 
     #[test]
     fn test_application_error_display() {
@@ -70,5 +71,4 @@ use super::*;
         let error = ApplicationError::new(ErrorType::DatabaseError, "Database connection failed".to_string());
         assert_eq!(format!("{:?}", error), "ApplicationError { error_type: DatabaseError, message: \"Database connection failed\" }");
     }
-
 }

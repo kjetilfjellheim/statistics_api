@@ -16,7 +16,7 @@ use crate::model::config::{AppSecurity, ApplicationArguments, DatabaseType, Http
 use crate::api::endpoints::{municipalities_add, municipalities_delete, municipalities_list, statistics_add, statistics_delete, statistics_list, value_add, value_delete, value_update, values_list};
 use crate::api::state::AppState;
 use crate::service::statistics::StatisticsService;
-use actix_web::middleware::{from_fn, Logger};
+use actix_web::middleware::{Logger, from_fn};
 use actix_web::{App, HttpServer, web};
 use actix_web_prom::{PrometheusMetrics, PrometheusMetricsBuilder};
 use clap::Parser;
@@ -40,11 +40,7 @@ async fn main() -> std::io::Result<()> {
     for directive in &config.logging.directives {
         filter = filter.add_directive(directive.parse().map_err(|err| std::io::Error::other(format!("Failed to parse logging directive: {err}")))?);
     }
-    let log_file = std::fs::OpenOptions::new()
-        .append(true)
-        .create(true)
-        .open(&config.logging.logfile)
-        .map_err(|err| std::io::Error::other(format!("Failed to open log file: {err}")))?;
+    let log_file = std::fs::OpenOptions::new().append(true).create(true).open(&config.logging.logfile).map_err(|err| std::io::Error::other(format!("Failed to open log file: {err}")))?;
 
     // Initialize logging
     tracing_subscriber::fmt()
@@ -79,7 +75,7 @@ async fn main() -> std::io::Result<()> {
     let statistics_dao = StatisticsDao::new();
     let statistics_service = StatisticsService::new(statistics_dao, connection_pool.clone());
 
-    let state = web::Data::new(AppState::new(jwt_service.clone(),statistics_service));
+    let state = web::Data::new(AppState::new(jwt_service.clone(), statistics_service));
 
     let prometheus = PrometheusMetricsBuilder::new("")
         .endpoint("/metrics/prometheus")
@@ -88,14 +84,10 @@ async fn main() -> std::io::Result<()> {
         .map_err(|err| std::io::Error::other(format!("Failed to create Prometheus metrics: {err}")))?;
 
     // Initialize custom metrics
-    let max_connections_gauge = IntGauge::new("max_connections", "Connection pool maximum")
-        .map_err(|err| std::io::Error::other(format!("Failed to create max_connections gauge: {err}")))?;
-    let min_connections_gauge = IntGauge::new("min_connections", "Connection pool minimum")
-        .map_err(|err| std::io::Error::other(format!("Failed to create min_connections gauge: {err}")))?;
-    let active_connections_gauge = IntGauge::new("active_connections", "Connection pool active")
-        .map_err(|err| std::io::Error::other(format!("Failed to create active_connections gauge: {err}")))?;
-    let idle_connections_gauge = IntGauge::new("idle_connections", "Connection pool idle")
-        .map_err(|err| std::io::Error::other(format!("Failed to create idle_connections gauge: {err}")))?;
+    let max_connections_gauge = IntGauge::new("max_connections", "Connection pool maximum").map_err(|err| std::io::Error::other(format!("Failed to create max_connections gauge: {err}")))?;
+    let min_connections_gauge = IntGauge::new("min_connections", "Connection pool minimum").map_err(|err| std::io::Error::other(format!("Failed to create min_connections gauge: {err}")))?;
+    let active_connections_gauge = IntGauge::new("active_connections", "Connection pool active").map_err(|err| std::io::Error::other(format!("Failed to create active_connections gauge: {err}")))?;
+    let idle_connections_gauge = IntGauge::new("idle_connections", "Connection pool idle").map_err(|err| std::io::Error::other(format!("Failed to create idle_connections gauge: {err}")))?;
     //Register custom prometheus metrics
     register_promethius_metrics(&prometheus, &max_connections_gauge)?;
     register_promethius_metrics(&prometheus, &min_connections_gauge)?;
@@ -109,9 +101,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(prometheus.clone())
             .wrap(from_fn(middleware::timing_middleware))
             .wrap(from_fn(middleware::digest_verification_middleware))
-            .wrap(Logger::new(
-                "%a %r %s %b %{Referer}i %{User-Agent}i %{X-Request-id}i %Dms"
-            ))
+            .wrap(Logger::new("%a %r %s %b %{Referer}i %{User-Agent}i %{X-Request-id}i %Dms"))
             .app_data(state.clone())
             .service(statistics_list)
             .service(statistics_add)
@@ -144,10 +134,7 @@ async fn main() -> std::io::Result<()> {
  * `gauge`: The gauge to register.
  */
 fn register_promethius_metrics(prometheus_metrics: &PrometheusMetrics, gauge: &IntGauge) -> Result<(), std::io::Error> {
-    prometheus_metrics
-        .registry
-        .register(Box::new(gauge.clone()))
-        .map_err(|err| std::io::Error::other(format!("Failed to register Prometheus gauge: {err}")))?;
+    prometheus_metrics.registry.register(Box::new(gauge.clone())).map_err(|err| std::io::Error::other(format!("Failed to register Prometheus gauge: {err}")))?;
     Ok(())
 }
 
@@ -162,13 +149,15 @@ fn register_promethius_metrics(prometheus_metrics: &PrometheusMetrics, gauge: &I
  * `connection_pool`: The connection pool to gather metrics from.
  */
 fn gather_db_metrics(max_connections_gauge: IntGauge, min_connections_gauge: IntGauge, active_connections_gauge: IntGauge, idle_connections_gauge: IntGauge, connection_pool: Arc<Pool<Postgres>>) {
-    thread::spawn(move || loop {
-        max_connections_gauge.set(i64::from(connection_pool.options().get_max_connections()));
-        min_connections_gauge.set(i64::from(connection_pool.options().get_min_connections()));
-        active_connections_gauge.set(i64::from(connection_pool.size()));
-        #[allow(clippy::cast_possible_wrap)]
-        idle_connections_gauge.set(connection_pool.num_idle() as i64);
-        thread::sleep(Duration::from_secs(1));
+    thread::spawn(move || {
+        loop {
+            max_connections_gauge.set(i64::from(connection_pool.options().get_max_connections()));
+            min_connections_gauge.set(i64::from(connection_pool.options().get_min_connections()));
+            active_connections_gauge.set(i64::from(connection_pool.size()));
+            #[allow(clippy::cast_possible_wrap)]
+            idle_connections_gauge.set(connection_pool.num_idle() as i64);
+            thread::sleep(Duration::from_secs(1));
+        }
     });
 }
 
@@ -183,10 +172,12 @@ fn gather_db_metrics(max_connections_gauge: IntGauge, min_connections_gauge: Int
  */
 fn ssl_builder(https_config: &HttpsConfig) -> Result<ServerConfig, ApplicationError> {
     let config_builder = ServerConfig::builder_with_protocol_versions(&get_protocol_versions());
-    let cert_file =
-        &mut std::io::BufReader::new(std::fs::File::open(https_config.clone().certificate_file).map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Failed to read certificate file: {err}")))?);
-    let key_file =
-        &mut std::io::BufReader::new(std::fs::File::open(https_config.clone().private_key_file).map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Failed to read private key file: {err}")))?);
+    let cert_file = &mut std::io::BufReader::new(
+        std::fs::File::open(https_config.clone().certificate_file).map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Failed to read certificate file: {err}")))?,
+    );
+    let key_file = &mut std::io::BufReader::new(
+        std::fs::File::open(https_config.clone().private_key_file).map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Failed to read private key file: {err}")))?,
+    );
     let cert_chain = certs(cert_file).collect::<Result<Vec<_>, _>>().map_err(|err| ApplicationError::new(ErrorType::Initialization, format!("Failed to convert certificate to der: {err}")))?;
     let mut keys = pkcs8_private_keys(key_file)
         .map(|key| key.map(PrivateKeyDer::Pkcs8))
