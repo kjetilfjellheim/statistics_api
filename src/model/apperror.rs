@@ -13,6 +13,7 @@ pub enum ErrorType {
     ConstraintViolation,
     Validation,
     DigestVerification,
+    SignatureVerification,
 }
 
 /**

@@ -28,6 +28,7 @@ tracing = "0.1.41" # For structured logging
 tracing-subscriber = { version = "0.3.19", features = ["fmt", "env-filter"] } # For tracing subscriber
 uuid = { version = "1.17.0", features = ["v4"] } # For generating unique identifiers when trace id is missing.
 sha2 = "0.10.9" # For SHA-256 hashing
+openssl = { version = "0.10.73", features = ["vendored"] } # For OpenSSL support
 
 [dev-dependencies]
 dotenv = "0.15.0" # For loading environment variables from a .env file
