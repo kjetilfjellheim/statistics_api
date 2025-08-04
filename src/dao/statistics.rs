@@ -3,11 +3,14 @@ use std::borrow::Cow;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use sqlx::PgConnection;
-use tracing::{instrument, Instrument};
+use tracing::{Instrument, instrument};
 
 use crate::model::{
     apperror::{ApplicationError, ErrorType},
-    models::{MunicipalityAddInputType, MunicipalityDetailType, MunicipalityListOutputType, PaginationInput, PaginationOutput, StatisticAddInputType, StatisticDetailType, StatisticsListOutputType, ValueDetailType, ValuesAddUpdateInputType, ValuesListInputType, ValuesListOutputType},
+    models::{
+        MunicipalityAddInputType, MunicipalityDetailType, MunicipalityListOutputType, PaginationInput, PaginationOutput, StatisticAddInputType, StatisticDetailType, StatisticsListOutputType,
+        ValueDetailType, ValuesAddUpdateInputType, ValuesListInputType, ValuesListOutputType,
+    },
 };
 
 /**
@@ -114,7 +117,10 @@ impl StatisticsDao {
             .await
             .map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to execute query to get municipality list: {err}")))?;
         let mut elements: Vec<MunicipalityDetailType> = results.into_iter().map(MunicipalityDetailType::from).collect();
-        let pagination_output = Self::get_pagination_output(&pagination_input, i64::try_from(elements.len()).map_err(|err| ApplicationError::new(ErrorType::Validation, format!("Failed to get pagination output: {err}")))?);
+        let pagination_output = Self::get_pagination_output(
+            &pagination_input,
+            i64::try_from(elements.len()).map_err(|err| ApplicationError::new(ErrorType::Validation, format!("Failed to get pagination output: {err}")))?,
+        );
         elements.truncate(usize::try_from(pagination_input.page_size).map_err(|err| ApplicationError::new(ErrorType::Validation, format!("Failed to truncate elements: {err}")))?);
         Ok(MunicipalityListOutputType::new(elements, pagination_output))
     }
@@ -139,9 +145,7 @@ impl StatisticsDao {
             .execute(transaction)
             .instrument(span)
             .await
-            .map_err(|err| {
-                Self::handle_database_error(err.as_database_error())
-            })?;
+            .map_err(|err| Self::handle_database_error(err.as_database_error()))?;
         Ok(())
     }
 
@@ -196,7 +200,10 @@ impl StatisticsDao {
             .await
             .map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to execute query to get statistics list: {err}")))?;
         let mut elements: Vec<StatisticDetailType> = results.into_iter().map(StatisticDetailType::from).collect();
-        let pagination_output = Self::get_pagination_output(&pagination_input, i64::try_from(elements.len()).map_err(|err| ApplicationError::new(ErrorType::Validation, format!("Failed to get pagination output: {err}")))?);
+        let pagination_output = Self::get_pagination_output(
+            &pagination_input,
+            i64::try_from(elements.len()).map_err(|err| ApplicationError::new(ErrorType::Validation, format!("Failed to get pagination output: {err}")))?,
+        );
         elements.truncate(usize::try_from(pagination_input.page_size).map_err(|err| ApplicationError::new(ErrorType::Validation, format!("Failed to truncate elements: {err}")))?);
         Ok(StatisticsListOutputType::new(elements, pagination_output))
     }
@@ -221,9 +228,7 @@ impl StatisticsDao {
             .execute(transaction)
             .instrument(span)
             .await
-            .map_err(|err| {
-                Self::handle_database_error(err.as_database_error())
-            })?;
+            .map_err(|err| Self::handle_database_error(err.as_database_error()))?;
         Ok(())
     }
 
@@ -312,7 +317,10 @@ impl StatisticsDao {
             .await
             .map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to execute query for values list: {err}")))?;
         let mut elements: Vec<ValueDetailType> = results.into_iter().map(ValueDetailType::from).collect();
-        let pagination_output = Self::get_pagination_output(&pagination_input, i64::try_from(elements.len()).map_err(|err| ApplicationError::new(ErrorType::Validation, format!("Failed to get pagination output: {err}")))?);
+        let pagination_output = Self::get_pagination_output(
+            &pagination_input,
+            i64::try_from(elements.len()).map_err(|err| ApplicationError::new(ErrorType::Validation, format!("Failed to get pagination output: {err}")))?,
+        );
         elements.truncate(usize::try_from(pagination_input.page_size).map_err(|err| ApplicationError::new(ErrorType::Validation, format!("Failed to truncate elements: {err}")))?);
         Ok(ValuesListOutputType::new(elements, pagination_output))
     }
@@ -330,13 +338,7 @@ impl StatisticsDao {
     #[instrument(skip(self, transaction), fields(result))]
     pub async fn add_value(&self, transaction: &mut PgConnection, value_add_input: ValuesAddUpdateInputType) -> Result<i64, ApplicationError> {
         let span = tracing::Span::current();
-        let next_id: (i64,) = sqlx::query_as(NEXT_VALUE_ID)
-            .fetch_one(transaction.as_mut())
-            .instrument(span.clone())
-            .await
-            .map_err(|err| {
-                Self::handle_database_error(err.as_database_error())
-            })?;
+        let next_id: (i64,) = sqlx::query_as(NEXT_VALUE_ID).fetch_one(transaction.as_mut()).instrument(span.clone()).await.map_err(|err| Self::handle_database_error(err.as_database_error()))?;
 
         sqlx::query("INSERT INTO data (id, id_municipality, id_statistic, value, year, inserted_by, updated_by, inserted_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $6, now(), now())")
             .bind(next_id.0)
@@ -348,9 +350,7 @@ impl StatisticsDao {
             .execute(transaction)
             .instrument(span.clone())
             .await
-            .map_err(|err| {
-                Self::handle_database_error(err.as_database_error())
-            })?;
+            .map_err(|err| Self::handle_database_error(err.as_database_error()))?;
         Ok(next_id.0)
     }
 
@@ -378,9 +378,7 @@ impl StatisticsDao {
             .execute(transaction)
             .instrument(span.clone())
             .await
-            .map_err(|err| {
-                Self::handle_database_error(err.as_database_error())
-            })?;
+            .map_err(|err| Self::handle_database_error(err.as_database_error()))?;
         if result.rows_affected() == 0 {
             tracing::debug!("Value with id {} not found for update", value_id);
             return Err(ApplicationError::new(ErrorType::NotFound, "Value not found".to_string()));
@@ -417,16 +415,19 @@ impl StatisticsDao {
      * An `ApplicationError` corresponding to the database error.
      */
     fn handle_database_error(error: Option<&dyn sqlx::error::DatabaseError>) -> ApplicationError {
-        if let Some(db_error) = error {            
+        if let Some(db_error) = error {
             tracing::debug!("Database error: {}", db_error);
             tracing::info!("Add/Update error: {:?}", db_error.code());
-            if db_error.code() == Some(Cow::Borrowed("23505")) { // Unique violation   
+            if db_error.code() == Some(Cow::Borrowed("23505")) {
+                // Unique violation
                 return ApplicationError::new(ErrorType::ConstraintViolation, "Already exists".to_string());
-            } else if db_error.code() == Some(Cow::Borrowed("23503")) { // Foreign key violation
+            } else if db_error.code() == Some(Cow::Borrowed("23503")) {
+                // Foreign key violation
                 return ApplicationError::new(ErrorType::ConstraintViolation, "Missing parent value".to_string());
-            } else if db_error.code() == Some(Cow::Borrowed("22001")) { // Value too long
-                return ApplicationError::new(ErrorType::Validation, "Value too long".to_string());                
-            } 
+            } else if db_error.code() == Some(Cow::Borrowed("22001")) {
+                // Value too long
+                return ApplicationError::new(ErrorType::Validation, "Value too long".to_string());
+            }
             tracing::error!("Unhandled database error: {}", db_error);
             return ApplicationError::new(ErrorType::DatabaseError, "Unhandled database error".to_string());
         }
@@ -440,10 +441,7 @@ mod test {
 
     #[test]
     fn test_pagination_output_has_more() {
-        let pagination_input = PaginationInput {
-            start_index: 0,
-            page_size: 10,
-        };
+        let pagination_input = PaginationInput { start_index: 0, page_size: 10 };
         let elements_size = 11;
         let pagination_output = StatisticsDao::get_pagination_output(&pagination_input, elements_size);
         assert_eq!(pagination_output.start_index, 0);
@@ -453,17 +451,13 @@ mod test {
 
     #[test]
     fn test_pagination_output_has_no_more() {
-        let pagination_input = PaginationInput {
-            start_index: 0,
-            page_size: 10,
-        };
+        let pagination_input = PaginationInput { start_index: 0, page_size: 10 };
         let elements_size = 10;
         let pagination_output = StatisticsDao::get_pagination_output(&pagination_input, elements_size);
         assert_eq!(pagination_output.start_index, 0);
         assert_eq!(pagination_output.page_size, 10);
         assert!(!pagination_output.has_more);
     }
-
 }
 
 #[cfg(feature = "integration-test")]
@@ -476,117 +470,77 @@ mod integration_test {
     async fn test_get_municipality_list() {
         let pool = init_db().await;
         let statistics_dao = StatisticsDao::new();
-        let pagination_input = PaginationInput {
-            start_index: 0,
-            page_size: 10,
-        };
+        let pagination_input = PaginationInput { start_index: 0, page_size: 10 };
         let mut connection = pool.acquire().await.unwrap();
         let result = statistics_dao.get_municipality_list(&mut connection, pagination_input).await;
         assert!(result.is_ok());
-    } 
+    }
 
     #[sqlx::test]
     async fn test_add_then_delete_municipality() {
         let pool = init_db().await;
         let mut transaction = pool.begin().await.unwrap();
         let statistics_dao = StatisticsDao::new();
-        let municipality_add_input = MunicipalityAddInputType {
-            id: 1,
-            name: "Test Municipality".to_string(),
-            created_by: "test_user".to_string(),
-        };
+        let municipality_add_input = MunicipalityAddInputType { id: 1, name: "Test Municipality".to_string(), created_by: "test_user".to_string() };
         let add_result = statistics_dao.add_municipality(&mut transaction, municipality_add_input).await;
         assert!(add_result.is_ok());
         let delete_result = statistics_dao.delete_municipality(&mut transaction, 1).await;
         assert!(delete_result.is_ok());
         transaction.rollback().await.unwrap(); // Rollback the transaction to avoid leaving test data in the database
-    } 
+    }
 
     #[sqlx::test]
     async fn test_get_statistics_list() {
         let pool = init_db().await;
         let statistics_dao = StatisticsDao::new();
-        let pagination_input = PaginationInput {
-            start_index: 0,
-            page_size: 10,
-        };
+        let pagination_input = PaginationInput { start_index: 0, page_size: 10 };
         let mut connection = pool.acquire().await.unwrap();
         let result = statistics_dao.get_statistics_list(&mut connection, pagination_input).await;
         assert!(result.is_ok());
-    } 
+    }
 
     #[sqlx::test]
     async fn test_add_then_delete_statistics() {
         let pool = init_db().await;
         let mut transaction = pool.begin().await.unwrap();
         let statistics_dao = StatisticsDao::new();
-        let statistics_add_input = StatisticAddInputType {
-            id: 1,
-            name: "Test Statistics".to_string(),
-            created_by: "test_user".to_string(),
-        };
+        let statistics_add_input = StatisticAddInputType { id: 1, name: "Test Statistics".to_string(), created_by: "test_user".to_string() };
         let add_result = statistics_dao.add_statistics(&mut transaction, statistics_add_input).await;
         assert!(add_result.is_ok());
         let delete_result = statistics_dao.delete_statistics(&mut transaction, 1).await;
         assert!(delete_result.is_ok());
         transaction.rollback().await.unwrap(); // Rollback the transaction to avoid leaving test data in the database
-    } 
+    }
 
     #[sqlx::test]
     async fn test_list_values() {
         let pool = init_db().await;
         let mut transaction = pool.begin().await.unwrap();
         let statistics_dao = StatisticsDao::new();
-        let statistics_add_input = StatisticAddInputType {
-            id: 1,
-            name: "Test Statistics".to_string(),
-            created_by: "test_user".to_string(),
-        };
+        let statistics_add_input = StatisticAddInputType { id: 1, name: "Test Statistics".to_string(), created_by: "test_user".to_string() };
         let add_result = statistics_dao.add_statistics(&mut transaction, statistics_add_input).await;
         assert!(add_result.is_ok());
-        let municipality_add_input = MunicipalityAddInputType {
-            id: 1,
-            name: "Test Municipality".to_string(),
-            created_by: "test_user".to_string(),
-        };
+        let municipality_add_input = MunicipalityAddInputType { id: 1, name: "Test Municipality".to_string(), created_by: "test_user".to_string() };
         let add_result = statistics_dao.add_municipality(&mut transaction, municipality_add_input).await;
         assert!(add_result.is_ok());
-        let values_list_input = ValuesListInputType {
-            id_municipality: Some(1),
-            id_statistic: Some(1),
-            year: Some(2023),
-        };
+        let values_list_input = ValuesListInputType { id_municipality: Some(1), id_statistic: Some(1), year: Some(2023) };
         let mut connection = pool.acquire().await.unwrap();
         let values_list_output = statistics_dao.get_values_list(&mut connection, PaginationInput { start_index: 0, page_size: 10 }, values_list_input).await;
         assert!(values_list_output.is_ok());
-    } 
+    }
 
     #[sqlx::test]
     async fn test_add_update_then_delete_value() {
         let pool = init_db().await;
         let mut transaction = pool.begin().await.unwrap();
         let statistics_dao = StatisticsDao::new();
-        let statistics_add_input = StatisticAddInputType {
-            id: 1,
-            name: "Test Statistics".to_string(),
-            created_by: "test_user".to_string(),
-        };
+        let statistics_add_input = StatisticAddInputType { id: 1, name: "Test Statistics".to_string(), created_by: "test_user".to_string() };
         let add_result = statistics_dao.add_statistics(&mut transaction, statistics_add_input).await;
         assert!(add_result.is_ok());
-        let municipality_add_input = MunicipalityAddInputType {
-            id: 1,
-            name: "Test Municipality".to_string(),
-            created_by: "test_user".to_string(),
-        };
+        let municipality_add_input = MunicipalityAddInputType { id: 1, name: "Test Municipality".to_string(), created_by: "test_user".to_string() };
         let add_result = statistics_dao.add_municipality(&mut transaction, municipality_add_input).await;
         assert!(add_result.is_ok());
-        let value_add_input = ValuesAddUpdateInputType {
-            id_municipality: 1,
-            id_statistic: 1,
-            value: Decimal::new(100, 2),
-            year: 2023,
-            claim_name: "test_user".to_string(),
-        };
+        let value_add_input = ValuesAddUpdateInputType { id_municipality: 1, id_statistic: 1, value: Decimal::new(100, 2), year: 2023, claim_name: "test_user".to_string() };
         let add_result = statistics_dao.add_value(&mut transaction, value_add_input.clone()).await;
         assert!(add_result.is_ok());
 
@@ -599,7 +553,7 @@ mod integration_test {
     }
 
     /**
-     * Initialize the database connection pool. 
+     * Initialize the database connection pool.
      */
     async fn init_db() -> PgPool {
         dotenv::from_filename("./sqlx-postgresql-migration/.env-test").ok();

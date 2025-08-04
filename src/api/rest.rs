@@ -1,4 +1,4 @@
-use actix_web::{http::StatusCode, HttpResponse, ResponseError};
+use actix_web::{HttpResponse, ResponseError, http::StatusCode};
 use chrono::Utc;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -27,9 +27,8 @@ pub struct MunicipalityListResponse {
     pub pagination: PaginationResponse,
 }
 
-
 impl MunicipalityListResponse {
-    /** 
+    /**
      * Creates a new instance of `MunicipalityListResponse`.
      *
      * # Arguments
@@ -399,7 +398,7 @@ impl From<ValueDetailType> for ValueDetailElement {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ValuesAddUpdateRequest { 
+pub struct ValuesAddUpdateRequest {
     /**
      * The ID of the municipality.
      */
@@ -576,12 +575,7 @@ mod test {
 
     #[test]
     fn test_municipality_detail_element_from_type() {
-        let detail_type = MunicipalityDetailType {
-            id: 1,
-            name: "Test Municipality".to_string(),
-            created_at: Utc::now(),
-            created_by: "admin".to_string(),
-        };
+        let detail_type = MunicipalityDetailType { id: 1, name: "Test Municipality".to_string(), created_at: Utc::now(), created_by: "admin".to_string() };
         let detail_element: MunicipalityDetailElement = detail_type.into();
         assert_eq!(detail_element.id, 1);
         assert_eq!(detail_element.name, "Test Municipality");
@@ -591,12 +585,7 @@ mod test {
 
     #[test]
     fn test_statistic_detail_element_from_type() {
-        let detail_type = StatisticDetailType {
-            id: 1,
-            name: "Test Statistic".to_string(),
-            created_at: Utc::now(),
-            created_by: "admin".to_string(),
-        };
+        let detail_type = StatisticDetailType { id: 1, name: "Test Statistic".to_string(), created_at: Utc::now(), created_by: "admin".to_string() };
         let detail_element: StatisticDetailElement = detail_type.into();
         assert_eq!(detail_element.id, 1);
         assert_eq!(detail_element.name, "Test Statistic");

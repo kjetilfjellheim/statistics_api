@@ -1,13 +1,15 @@
 use std::sync::Arc;
 
 use sqlx::{Pool, Postgres};
-use tracing::{instrument, Instrument};
+use tracing::{Instrument, instrument};
 
 use crate::{
     dao::statistics::StatisticsDao,
     model::{
         apperror::{ApplicationError, ErrorType},
-        models::{MunicipalityAddInputType, MunicipalityListOutputType, PaginationInput, StatisticAddInputType, StatisticsListOutputType, ValuesAddUpdateInputType, ValuesListInputType, ValuesListOutputType},
+        models::{
+            MunicipalityAddInputType, MunicipalityListOutputType, PaginationInput, StatisticAddInputType, StatisticsListOutputType, ValuesAddUpdateInputType, ValuesListInputType, ValuesListOutputType,
+        },
     },
 };
 
@@ -26,7 +28,6 @@ pub struct StatisticsService {
 }
 
 impl StatisticsService {
-
     /**
      * Creates a new instance of `StatisticsService`.
      *
@@ -53,7 +54,8 @@ impl StatisticsService {
     #[instrument(skip(self))]
     pub async fn get_municipality_list(&self, pagination_input: PaginationInput) -> Result<MunicipalityListOutputType, ApplicationError> {
         let span = tracing::Span::current();
-        let mut connection = self.connection_pool.acquire().instrument(span.clone()).await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to acquire connection: {err}")))?;
+        let mut connection =
+            self.connection_pool.acquire().instrument(span.clone()).await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to acquire connection: {err}")))?;
         self.statistics_dao.get_municipality_list(&mut connection, pagination_input).instrument(span).await
     }
 
@@ -69,7 +71,8 @@ impl StatisticsService {
     #[instrument(skip(self))]
     pub async fn add_municipality(&self, municipality_add_input: MunicipalityAddInputType) -> Result<(), ApplicationError> {
         let span: tracing::Span = tracing::Span::current();
-        let mut transaction = self.connection_pool.begin().instrument(span.clone()).await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to begin transaction: {err}")))?;
+        let mut transaction =
+            self.connection_pool.begin().instrument(span.clone()).await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to begin transaction: {err}")))?;
         match self.statistics_dao.add_municipality(&mut transaction, municipality_add_input).instrument(span.clone()).await {
             Ok(()) => transaction.commit().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to commit transaction: {err}")))?,
             Err(err) => {
@@ -92,7 +95,8 @@ impl StatisticsService {
     #[instrument(skip(self))]
     pub async fn delete_municipality(&self, municipality_id: i64) -> Result<(), ApplicationError> {
         let span: tracing::Span = tracing::Span::current();
-        let mut transaction = self.connection_pool.begin().instrument(span.clone()).await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to begin transaction: {err}")))?;
+        let mut transaction =
+            self.connection_pool.begin().instrument(span.clone()).await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to begin transaction: {err}")))?;
         match self.statistics_dao.delete_municipality(&mut transaction, municipality_id).instrument(span.clone()).await {
             Ok(()) => transaction.commit().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to commit transaction: {err}")))?,
             Err(err) => {
@@ -115,7 +119,8 @@ impl StatisticsService {
     #[instrument(skip(self))]
     pub async fn get_statistics_list(&self, pagination_input: PaginationInput) -> Result<StatisticsListOutputType, ApplicationError> {
         let span: tracing::Span = tracing::Span::current();
-        let mut connection = self.connection_pool.acquire().instrument(span.clone()).await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to acquire connection: {err}")))?;
+        let mut connection =
+            self.connection_pool.acquire().instrument(span.clone()).await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to acquire connection: {err}")))?;
         self.statistics_dao.get_statistics_list(&mut connection, pagination_input).instrument(span.clone()).await
     }
 
@@ -131,7 +136,8 @@ impl StatisticsService {
     #[instrument(skip(self))]
     pub async fn add_statistic(&self, statistics_add_input: StatisticAddInputType) -> Result<(), ApplicationError> {
         let span: tracing::Span = tracing::Span::current();
-        let mut transaction = self.connection_pool.begin().instrument(span.clone(), ).await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to begin transaction: {err}")))?;
+        let mut transaction =
+            self.connection_pool.begin().instrument(span.clone()).await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to begin transaction: {err}")))?;
         match self.statistics_dao.add_statistics(&mut transaction, statistics_add_input).instrument(span.clone()).await {
             Ok(()) => transaction.commit().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to commit transaction: {err}")))?,
             Err(err) => {
@@ -154,7 +160,8 @@ impl StatisticsService {
     #[instrument(skip(self))]
     pub async fn delete_statistics(&self, statistics_id: i64) -> Result<(), ApplicationError> {
         let span: tracing::Span = tracing::Span::current();
-        let mut transaction = self.connection_pool.begin().instrument(span.clone()).await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to begin transaction: {err}")))?;
+        let mut transaction =
+            self.connection_pool.begin().instrument(span.clone()).await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to begin transaction: {err}")))?;
         match self.statistics_dao.delete_statistics(&mut transaction, statistics_id).instrument(span.clone()).await {
             Ok(()) => transaction.commit().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to commit transaction: {err}")))?,
             Err(err) => {
@@ -177,8 +184,9 @@ impl StatisticsService {
      */
     #[instrument(skip(self))]
     pub async fn get_values_list(&self, pagination_input: PaginationInput, filter_params: ValuesListInputType) -> Result<ValuesListOutputType, ApplicationError> {
-        let span: tracing::Span = tracing::Span::current(); 
-        let mut connection = self.connection_pool.acquire().instrument(span.clone()).await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to acquire connection: {err}")))?;
+        let span: tracing::Span = tracing::Span::current();
+        let mut connection =
+            self.connection_pool.acquire().instrument(span.clone()).await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to acquire connection: {err}")))?;
         self.statistics_dao.get_values_list(&mut connection, pagination_input, filter_params).instrument(span).await
     }
 
@@ -194,7 +202,8 @@ impl StatisticsService {
     #[instrument(skip(self))]
     pub async fn delete_value(&self, value_id: i64) -> Result<(), ApplicationError> {
         let span: tracing::Span = tracing::Span::current();
-        let mut transaction = self.connection_pool.begin().instrument(span.clone()).await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to begin transaction: {err}")))?;
+        let mut transaction =
+            self.connection_pool.begin().instrument(span.clone()).await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to begin transaction: {err}")))?;
         match self.statistics_dao.delete_value(&mut transaction, value_id).instrument(span.clone()).await {
             Ok(()) => transaction.commit().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to commit transaction: {err}")))?,
             Err(err) => {
@@ -217,7 +226,8 @@ impl StatisticsService {
     #[instrument(skip(self))]
     pub async fn add_value(&self, value_add_input: ValuesAddUpdateInputType) -> Result<(), ApplicationError> {
         let span: tracing::Span = tracing::Span::current();
-        let mut transaction = self.connection_pool.begin().instrument(span.clone()).await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to begin transaction: {err}")))?;
+        let mut transaction =
+            self.connection_pool.begin().instrument(span.clone()).await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to begin transaction: {err}")))?;
         match self.statistics_dao.add_value(&mut transaction, value_add_input).instrument(span.clone()).await {
             Ok(_value_id) => transaction.commit().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to commit transaction: {err}")))?,
             Err(err) => {
@@ -225,7 +235,7 @@ impl StatisticsService {
                 return Err(err);
             }
         }
-        Ok(())   
+        Ok(())
     }
 
     /**
@@ -241,7 +251,8 @@ impl StatisticsService {
     #[instrument(skip(self))]
     pub async fn update_value(&self, value_id: i64, value_add_update_input: ValuesAddUpdateInputType) -> Result<(), ApplicationError> {
         let span: tracing::Span = tracing::Span::current();
-        let mut transaction = self.connection_pool.begin().instrument(span.clone()).await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to begin transaction: {err}")))?;
+        let mut transaction =
+            self.connection_pool.begin().instrument(span.clone()).await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to begin transaction: {err}")))?;
         match self.statistics_dao.update_value(&mut transaction, value_id, value_add_update_input).instrument(span.clone()).await {
             Ok(()) => transaction.commit().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to commit transaction: {err}")))?,
             Err(err) => {

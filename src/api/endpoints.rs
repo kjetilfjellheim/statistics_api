@@ -1,11 +1,15 @@
 use actix_web::{
-    delete, post, put, web::{self, Path}, HttpRequest, HttpResponse
+    HttpRequest, HttpResponse, delete, post, put,
+    web::{self, Path},
 };
-use tracing::{instrument, Instrument};
+use tracing::{Instrument, instrument};
 
 use crate::{
     api::{
-        rest::{MunicipalityAddRequest, MunicipalityListResponse, PaginationQuery, StatisticsAddRequest, StatisticsListRequest, StatisticsListResponse, ValuesAddUpdateRequest, ValuesListRequest, ValuesListResponse},
+        rest::{
+            MunicipalityAddRequest, MunicipalityListResponse, PaginationQuery, StatisticsAddRequest, StatisticsListRequest, StatisticsListResponse, ValuesAddUpdateRequest, ValuesListRequest,
+            ValuesListResponse,
+        },
         state::AppState,
     },
     model::{
@@ -23,7 +27,7 @@ pub async fn statistics_list(
     http_request: HttpRequest,
     request_body: web::Json<StatisticsListRequest>,
     pagination: web::Query<PaginationQuery>,
-    app_state: web::Data<AppState>
+    app_state: web::Data<AppState>,
 ) -> Result<HttpResponse, ApplicationError> {
     let span = tracing::Span::current();
     let _ = app_state.jwt_service.validate(&http_request)?;
@@ -64,10 +68,10 @@ pub async fn statistics_delete(path: Path<i64>, http_request: HttpRequest, app_s
 #[instrument(skip(http_request, app_state), fields(service = "listMunicipalities", trace_id = get_trace_id(&http_request), result))]
 #[post("/api/services/v1_0/municipalities:list")]
 pub async fn municipalities_list(
-    http_request: HttpRequest, 
+    http_request: HttpRequest,
     request_body: web::Json<StatisticsListRequest>,
     pagination: web::Query<PaginationQuery>,
-    app_state: web::Data<AppState>
+    app_state: web::Data<AppState>,
 ) -> Result<HttpResponse, ApplicationError> {
     let span = tracing::Span::current();
     let _ = app_state.jwt_service.validate(&http_request)?;
@@ -166,9 +170,7 @@ pub async fn value_update(path: Path<i64>, http_request: HttpRequest, request_bo
  * If the trace ID is not present, a new UUID is generated.
  */
 fn get_trace_id(http_request: &HttpRequest) -> String {
-    http_request.headers().get("X-Request-ID")
-        .and_then(|v| v.to_str().ok().map(std::string::ToString::to_string))
-        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
+    http_request.headers().get("X-Request-ID").and_then(|v| v.to_str().ok().map(std::string::ToString::to_string)).unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
 }
 
 #[cfg(test)]
@@ -179,18 +181,14 @@ mod test {
 
     #[actix_web::test]
     async fn test_get_trace_id_exists() {
-        let request = TestRequest::default()
-            .insert_header(("X-Request-ID", "test"))
-            .to_http_request();
+        let request = TestRequest::default().insert_header(("X-Request-ID", "test")).to_http_request();
         let trace_id = get_trace_id(&request);
         assert_eq!(trace_id, "test");
     }
 
-
     #[actix_web::test]
     async fn test_get_trace_id_not_exists() {
-        let request = TestRequest::default()
-            .to_http_request();
+        let request = TestRequest::default().to_http_request();
         let trace_id = get_trace_id(&request);
         assert!(!trace_id.is_empty());
     }
