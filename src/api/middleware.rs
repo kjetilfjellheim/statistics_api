@@ -80,7 +80,6 @@ fn verify_digest(digest: &str, body: &[u8]) -> Result<(), ApplicationError> {
     if result == expected_hash {
         Ok(())
     } else {
-        println!("Expected: {}, Got: {}", expected_hash, result);
         Err(ApplicationError::new(crate::model::apperror::ErrorType::DigestVerification, "Digest verification failed".to_string()).into())
     }
 }

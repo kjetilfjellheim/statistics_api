@@ -85,8 +85,9 @@ impl HttpSignaturesServicee {
         )?;
         let pkey = self.keys.get(&signature_input.keyid)
             .ok_or_else(|| ApplicationError::new(crate::model::apperror::ErrorType::SignatureVerification, "Key not found".to_string()))?;
-        let mut verifier = openssl::sign::Verifier::new( MessageDigest::sha512(), pkey).unwrap();
-        let result = verifier.verify_oneshot(&signature, &signature_input.get_signature_base().as_bytes()).unwrap();
+        let mut verifier = openssl::sign::Verifier::new(MessageDigest::sha512(),  pkey).unwrap();
+        let signature_base = signature_input.get_signature_base();
+        let result = verifier.verify_oneshot(&signature, &signature_base.as_bytes()).unwrap();
         if result {
             Ok(())
         } else {
@@ -272,7 +273,6 @@ impl SignatureInput {
                 },
             }
         }
-        println!("{}", signature_base);
         signature_base
     }
 }
@@ -402,8 +402,6 @@ mod test {
         signer.update(data_to_sign.as_bytes()).unwrap();
         let signature = signer.sign_to_vec().unwrap();
         let signature = STANDARD.encode(&signature);
-
-
         let header_defs = HashMap::new();
 
         let mut headers = HeaderMap::new();
@@ -411,7 +409,7 @@ mod test {
         headers.insert(HeaderName::from_static("content-type"), "application/json".parse().unwrap());
         headers.insert(HeaderName::from_static("content-digest"), "sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:".parse().unwrap());
         headers.insert(HeaderName::from_static("date"), "Tue, 20 Apr 2021 02:07:55 GMT".parse().unwrap());
-        headers.insert(HeaderName::from_static("signature"), format!("sig=:{signature}:").parse().unwrap());
+        headers.insert(HeaderName::from_static("signature"), format!("sig=:{}:", signature).parse().unwrap());
 
         let method = "POST";
         let request_target = "/foo?param=value&pet=dog";
@@ -425,4 +423,24 @@ mod test {
         assert!(service.verify_signature(&headers, method, request_target).is_ok());
     } 
 
+    #[tokio::test]
+    async fn test_verify_success_2() {
+        let header_defs = HashMap::new();
+
+        let mut headers = HeaderMap::new();
+        headers.insert(HeaderName::from_static("signature-input"), "sig=(\"@method\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754305966;expires=1954306266".parse().unwrap());
+        headers.insert(HeaderName::from_static("signature"), format!("sig=:B6zbxfFjV31snNkpUbV4MO/DeyRwNW23ehaES4XjbSaoS7LMSS2qEPp1pEfOMq54aBBKMHirli3aO7ddnvpuZWQKtlCQrR8ceVDZnJG9qQTazwM/FYn4i4KV7LEgIeca+r61dU5b+xV9LDiKzQ4EnUpHGIasBuDpLFotJmh/fbqIodlYRs6UZXeEQyigFM9+8JbFVmmceRUacc6WseXDFr/tZxvt4jfZlsEB57PTLjIQdyL86RLCTQ6NIGdM8ztDiAskVqR53U7f+ldwXjn2p8DSj/qfMaWbQQ+e+gzaTVTJSC2eUNOt1kJVsoYDRxFn44tWZlPrwdAWfYiukIVqjg==:").parse().unwrap());
+
+        let method = "POST";
+        let request_target = "/foo?param=value&pet=dog";
+
+        let mut keys = HashMap::new();
+        let pem_data = fs::read("/home/kjetil/test_certs/public_key.pem").unwrap();
+        let public_key = openssl::rsa::Rsa::public_key_from_pem(&pem_data).unwrap();
+        let pkey = openssl::pkey::PKey::from_rsa(public_key).unwrap();
+        keys.insert("key123".to_string(), pkey);
+        let service = HttpSignaturesServicee::new(header_defs, true, true, HashSet::new(), HashSet::new(), keys);
+        let result = service.verify_signature(&headers, method, request_target);
+        assert!(result.is_ok());
+    } 
 }
