@@ -63,12 +63,12 @@ mod test {
     #[test]
     fn test_application_error_display() {
         let error = ApplicationError::new(ErrorType::NotFound, "Resource not found".to_string());
-        assert_eq!(format!("{}", error), "Application error Resource not found");
+        assert_eq!(format!("{error}"), "Application error Resource not found");
     }
 
     #[test]
     fn test_application_error_debug() {
         let error = ApplicationError::new(ErrorType::DatabaseError, "Database connection failed".to_string());
-        assert_eq!(format!("{:?}", error), "ApplicationError { error_type: DatabaseError, message: \"Database connection failed\" }");
+        assert_eq!(format!("{error:?}"), "ApplicationError { error_type: DatabaseError, message: \"Database connection failed\" }");
     }
 }

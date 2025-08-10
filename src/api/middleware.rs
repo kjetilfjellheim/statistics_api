@@ -71,10 +71,10 @@ fn verify_digest(digest: &str, body: &[u8]) -> Result<(), ApplicationError> {
             algorithm.update(body);
             algorithm.finalize().to_vec()
         }
-        _ => return Err(ApplicationError::new(crate::model::apperror::ErrorType::Application, "Unsupported digest algorithm".to_string()).into()),
+        _ => return Err(ApplicationError::new(crate::model::apperror::ErrorType::Application, "Unsupported digest algorithm".to_string())),
     };
     let result = STANDARD.encode(hash_result);
-    if result == expected_hash { Ok(()) } else { Err(ApplicationError::new(crate::model::apperror::ErrorType::DigestVerification, "Digest verification failed".to_string()).into()) }
+    if result == expected_hash { Ok(()) } else { Err(ApplicationError::new(crate::model::apperror::ErrorType::DigestVerification, "Digest verification failed".to_string())) }
 }
 
 #[cfg(test)]
