@@ -15,7 +15,7 @@ pub struct HttpSignaturesServicee {
      * A map of keys used for signature verification. The key ID is used to look up the public key.
      * The key ID is expected to be in the `keyid` field of the signature input.
      */
-    keys: HashMap<String, Vec<u8>>,
+    keys: HashMap<String, KeyParams>,
 }
 
 impl HttpSignaturesServicee {
@@ -29,7 +29,7 @@ impl HttpSignaturesServicee {
      * # Returns
      * A new instance of `HttpSignaturesServicee`.  
      */
-    pub fn new(requirements: HashSet<VerificationRequirement>, keys: HashMap<String, Vec<u8>>) -> Self {
+    pub fn new(requirements: HashSet<VerificationRequirement>, keys: HashMap<String, KeyParams>) -> Self {
         HttpSignaturesServicee { requirements, keys }
     }
 
@@ -58,7 +58,7 @@ impl HttpSignaturesServicee {
             self.requirements.clone(),
             headers.contains_key("content-digest") || headers.contains_key("content-type") || headers.contains_key("content-length"),
         )?;
-        let pkey = self.keys.get(&signature_input.keyid).ok_or_else(|| HttpSignaturesError::KeyNotFound { keyid: signature_input.keyid.clone() })?;
+        let pkey = self.keys.get(&signature_input.keyid).ok_or(HttpSignaturesError::KeyNotFound { keyid: signature_input.keyid.clone() })?;
         Self::verify(signature_input.alg.as_str(), pkey, signature_input.get_signature_base().as_bytes(), &signature)?;
         Ok(())
     }
@@ -74,7 +74,7 @@ impl HttpSignaturesServicee {
      * A `Result` containing the extracted signature or an error if the format is invalid.
      */
     fn get_signature(signature: &str) -> Result<String, HttpSignaturesError> {
-        between(signature, "sig=:", ":").map(|s| s.to_string()).ok_or_else(|| HttpSignaturesError::InvalidSignatureFormat)
+        between(signature, "sig=:", ":").map(|s| s.to_string()).ok_or(HttpSignaturesError::InvalidSignatureFormat)
     }
 
     /**
@@ -82,48 +82,108 @@ impl HttpSignaturesServicee {
      *
      * # Arguments
      * `algorithm`: The signature algorithm used (e.g., "RSA-PSS-SHA256").
-     * `pkey`: The public key used for verification.
+     * `key_params`: The key parameters for verification.
      * `signature_base`: The base string to verify against the signature.
      * `signature`: The signature to verify.
      *
      * # Returns
      * A `Result` indicating success or failure of the verification.
      */
-    fn verify(algorithm: &str, pkey: &Vec<u8>, signature_base: &[u8], signature: &[u8]) -> Result<(), HttpSignaturesError> {
+    fn verify(algorithm: &str, key_params: &KeyParams, signature_base: &[u8], signature: &[u8]) -> Result<(), HttpSignaturesError> {
         match algorithm.to_lowercase().as_str() {
             "rsa-pss-sha512" => {
-                let public_key = ring::signature::UnparsedPublicKey::new(&RSA_PSS_2048_8192_SHA512, &pkey);
-                public_key
-                    .verify(signature_base, signature)
-                    .map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+                if let Some(pkey) = &key_params.pkey {
+                    let public_key = ring::signature::UnparsedPublicKey::new(&RSA_PSS_2048_8192_SHA512, &pkey);
+                    public_key
+                        .verify(signature_base, signature)
+                        .map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+                } else {
+                    return Err(HttpSignaturesError::MissingKeyParam);
+                }
             }
             "rsa-v1_5-sha256" => {
-                let public_key = ring::signature::UnparsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256, &pkey);
-                public_key
-                    .verify(signature_base, signature)
-                    .map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+                if let Some(pkey) = &key_params.pkey {
+                    let public_key = ring::signature::UnparsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256, &pkey);
+                    public_key
+                        .verify(signature_base, signature)
+                        .map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+                } else {
+                    return Err(HttpSignaturesError::MissingKeyParam);
+                }
             }
             "ecdsa-p256-sha256" => {
-                let public_key = ring::signature::UnparsedPublicKey::new(&ECDSA_P256_SHA256_ASN1, &pkey);
-                public_key
-                    .verify(signature_base, signature)
-                    .map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+                if let Some(pkey) = &key_params.pkey {
+                    let public_key = ring::signature::UnparsedPublicKey::new(&ECDSA_P256_SHA256_ASN1, &pkey);
+                    public_key
+                        .verify(signature_base, signature)
+                        .map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+                } else {
+                    return Err(HttpSignaturesError::MissingKeyParam);
+                }
             }
             "ecdsa-p384-sha384" => {
-                let public_key = ring::signature::UnparsedPublicKey::new(&ECDSA_P384_SHA384_ASN1, &pkey);
-                public_key
-                    .verify(signature_base, signature)
-                    .map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+                if let Some(pkey) = &key_params.pkey {
+                    let public_key = ring::signature::UnparsedPublicKey::new(&ECDSA_P384_SHA384_ASN1, &pkey);
+                    public_key
+                        .verify(signature_base, signature)
+                        .map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+                } else {
+                    return Err(HttpSignaturesError::MissingKeyParam);
+                }
             }
             "ed25519" => {
-                let public_key = ring::signature::UnparsedPublicKey::new(&ED25519, &pkey);
-                public_key
-                    .verify(signature_base.as_ref(), signature.as_ref())
-                    .map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+                if let Some(pkey) = &key_params.pkey {
+                    let public_key = ring::signature::UnparsedPublicKey::new(&ED25519, &pkey);
+                    public_key
+                        .verify(signature_base.as_ref(), signature.as_ref())
+                        .map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+                } else {
+                    return Err(HttpSignaturesError::MissingKeyParam);
+                }
+            }
+            "hmac-sha256" => {
+                if let Some(shared_secret) = &key_params.shared_secret {
+                    let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, shared_secret.as_bytes());
+                    ring::hmac::verify(&key, signature_base, signature)
+                        .map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+                } else {
+                    return Err(HttpSignaturesError::MissingKeyParam);
+                }
             }
             _ => return Err(HttpSignaturesError::UnsupportedAlgorithm { algorithm: algorithm.to_string() }),
         };
         Ok(())
+    }
+}
+
+/**
+ * Key parameters for HTTP signatures.
+ */
+#[derive(Clone, Debug)]
+struct KeyParams {
+    /**
+     * The public key used for signature verification.
+     */
+    pub pkey: Option<Vec<u8>>,
+    /**
+     * The shared secret used for hmac signature verification.
+     */
+    pub shared_secret: Option<String>,
+}
+
+impl KeyParams {
+    /**
+     * Creates a new instance of `KeyParams`.
+     *
+     * # Arguments
+     * `pkey`: The public key used for signature verification.
+     * `shared_secret`: The shared secret used for hmac signature verification.
+     *
+     * # Returns
+     * A new instance of `KeyParams`.
+     */
+    pub fn new(pkey: Option<Vec<u8>>, shared_secret: Option<String>) -> Self {
+        KeyParams { pkey, shared_secret }
     }
 }
 
@@ -196,6 +256,11 @@ pub enum HttpSignaturesError {
      * Error indicating that the algorithm is unsupported. The unsupported algorithm is provided.
      */
     UnsupportedAlgorithm{ algorithm: String },
+    /**
+     * Missing key parameter. For rsa, edcsa and ed22519 this is the public key.
+     * For hmac this is the shared secret.
+     */
+    MissingKeyParam,
 }
 
 /**
@@ -351,7 +416,7 @@ impl SignatureInput {
     ) -> Result<Self, HttpSignaturesError> {
         let signature_input = headers
             .get("signature-input")
-            .ok_or_else(|| HttpSignaturesError::MissingSignatureInputHeader)?;
+            .ok_or(HttpSignaturesError::MissingSignatureInputHeader)?;
 
         let (sig, alg, keyid, created, expires) = Self::get_signature_elements(headers, method, request_target, signature_input);
         Self::verify_created_requirement(&requirements, created)?;
@@ -1091,7 +1156,6 @@ mod test {
             "\"date\": Tue, 20 Apr 2021 02:07:55 GMT\n\"content-type\": application/json\n\"content-digest\": sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:\n\"@method\": {method}\n\"@request-target\": {request_target}"
         );
         let mut signature_result = vec![0; key_pair.public().modulus_len()];
-        println!("Signature string: \n{signature_str}");
         key_pair.sign(&RSA_PSS_SHA512, &rand, signature_str.as_bytes(), &mut signature_result).unwrap();
         let signature = STANDARD.encode(&signature_result);
 
@@ -1105,8 +1169,8 @@ mod test {
         headers.insert("content-digest".to_string(), "sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:".to_string());
         headers.insert("date".to_string(), "Tue, 20 Apr 2021 02:07:55 GMT".to_string());
 
-        let mut keys: HashMap<String, Vec<u8>> = HashMap::new();
-        keys.insert("key123".to_string(), key_pair.public().as_ref().to_vec());
+        let mut keys: HashMap<String, KeyParams> = HashMap::new();
+        keys.insert("key123".to_string(), KeyParams::new(Some(key_pair.public().as_ref().to_vec()), None));
         let service = HttpSignaturesServicee::new(requirements, keys);
         let result = service.verify_signature(&headers, method, request_target);
         assert!(result.is_ok());
@@ -1140,8 +1204,8 @@ mod test {
         headers.insert("content-digest".to_string(), "sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:".to_string());
         headers.insert("date".to_string(), "Tue, 20 Apr 2021 02:07:55 GMT".to_string());
 
-        let mut keys: HashMap<String, Vec<u8>> = HashMap::new();
-        keys.insert("key123".to_string(), key_pair.public().as_ref().to_vec());
+        let mut keys: HashMap<String, KeyParams> = HashMap::new();
+        keys.insert("key123".to_string(), KeyParams::new(Some(key_pair.public().as_ref().to_vec()), None));
         let service = HttpSignaturesServicee::new(requirements, keys);
         let result = service.verify_signature(&headers, method, request_target);
         assert!(result.is_ok());
@@ -1173,8 +1237,8 @@ mod test {
         headers.insert("content-digest".to_string(), "sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:".to_string());
         headers.insert("date".to_string(), "Tue, 20 Apr 2021 02:07:55 GMT".to_string());
 
-        let mut keys: HashMap<String, Vec<u8>> = HashMap::new();
-        keys.insert("key123".to_string(), key_pair.public_key().as_ref().to_vec());
+        let mut keys: HashMap<String, KeyParams> = HashMap::new();
+        keys.insert("key123".to_string(), KeyParams::new(Some(key_pair.public_key().as_ref().to_vec()), None));
         let service = HttpSignaturesServicee::new(requirements, keys);
         let result = service.verify_signature(&headers, method, request_target);
         assert!(result.is_ok());
@@ -1206,8 +1270,8 @@ mod test {
         headers.insert("content-digest".to_string(), "sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:".to_string());
         headers.insert("date".to_string(), "Tue, 20 Apr 2021 02:07:55 GMT".to_string());
 
-        let mut keys: HashMap<String, Vec<u8>> = HashMap::new();
-        keys.insert("key123".to_string(), key_pair.public_key().as_ref().to_vec());
+        let mut keys: HashMap<String, KeyParams> = HashMap::new();
+        keys.insert("key123".to_string(), KeyParams::new(Some(key_pair.public_key().as_ref().to_vec()), None));
         let service = HttpSignaturesServicee::new(requirements, keys);
         let result = service.verify_signature(&headers, method, request_target);
         assert!(result.is_ok());
@@ -1240,8 +1304,38 @@ mod test {
         headers.insert("content-digest".to_string(), "sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:".to_string());
         headers.insert("date".to_string(), "Tue, 20 Apr 2021 02:07:55 GMT".to_string());
 
-        let mut keys: HashMap<String, Vec<u8>> = HashMap::new();
-        keys.insert("key123".to_string(), key_pair.public_key().as_ref().to_vec());
+        let mut keys: HashMap<String, KeyParams> = HashMap::new();
+        keys.insert("key123".to_string(), KeyParams::new(Some(key_pair.public_key().as_ref().to_vec()), None));
+        let service = HttpSignaturesServicee::new(requirements, keys);
+        let result = service.verify_signature(&headers, method, request_target);
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_verify_success_hmac_sha256() {
+        let requirements: HashSet<VerificationRequirement> = HashSet::new();
+
+        let method = "POST";
+        let request_target = "/foo?param=value&pet=dog";
+
+        let signature_str = format!(
+            "\"date\": Tue, 20 Apr 2021 02:07:55 GMT\n\"content-type\": application/json\n\"content-digest\": sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:\n\"@method\": {method}\n\"@request-target\": {request_target}"
+        );
+
+        let signature = STANDARD.encode(ring::hmac::sign(&ring::hmac::Key::new(ring::hmac::HMAC_SHA256, b"TestHMACKey"), signature_str.as_bytes()));
+
+        let mut headers: HashMap<String, String> = HashMap::new();
+        headers.insert(
+            "signature-input".to_string(),
+            "sig=(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"hmac-sha256\";keyid=\"key123\";created=1754409493;expires=1754409793".to_string(),
+        );
+        headers.insert("signature".to_string(), format!("sig=:{signature}:").to_string());
+        headers.insert("content-type".to_string(), "application/json".to_string());
+        headers.insert("content-digest".to_string(), "sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:".to_string());
+        headers.insert("date".to_string(), "Tue, 20 Apr 2021 02:07:55 GMT".to_string());
+
+        let mut keys: HashMap<String, KeyParams> = HashMap::new();
+        keys.insert("key123".to_string(), KeyParams::new(None, Some("TestHMACKey".to_string())));
         let service = HttpSignaturesServicee::new(requirements, keys);
         let result = service.verify_signature(&headers, method, request_target);
         assert!(result.is_ok());
