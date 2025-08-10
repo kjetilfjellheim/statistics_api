@@ -1,11 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use actix_web::http::header::HeaderMap;
-
 use base64::{Engine, engine::general_purpose::STANDARD};
 use ring::signature::{ECDSA_P256_SHA256_ASN1, ECDSA_P384_SHA384_ASN1, ED25519, RSA_PKCS1_2048_8192_SHA256, RSA_PSS_2048_8192_SHA512};
-
-use crate::model::apperror::ApplicationError;
 
 /**
  * Service for handling HTTP signatures.
@@ -48,22 +44,21 @@ impl HttpSignaturesServicee {
      * # Returns
      * A `Result` indicating success or failure of the verification.
      */
-    fn verify_signature(&self, headers: &HeaderMap, method: &str, target: &str) -> Result<(), ApplicationError> {
+    fn verify_signature(&self, headers: &HashMap<String, String>, method: &str, target: &str) -> Result<(), HttpSignaturesError> {
         let signature = Self::get_signature(
             headers
-                .get("Signature")
-                .and_then(|s| s.to_str().ok())
-                .ok_or_else(|| ApplicationError::new(crate::model::apperror::ErrorType::SignatureVerification, "Missing Signature header".to_string()))?,
+                .get("signature")
+                .ok_or_else(|| HttpSignaturesError::MissingSignatureHeader)?,
         )?;
-        let signature = STANDARD.decode(signature.as_bytes()).map_err(|_| ApplicationError::new(crate::model::apperror::ErrorType::SignatureVerification, "Invalid signature format".to_string()))?;
+        let signature = STANDARD.decode(signature.as_bytes()).map_err(|_| HttpSignaturesError::InvalidSignatureFormat)?;
         let signature_input = SignatureInput::new(
             headers,
             method,
             target,
             self.requirements.clone(),
-            headers.contains_key("Content-Digest") || headers.contains_key("Content-Type") || headers.contains_key("Content-Length"),
+            headers.contains_key("content-digest") || headers.contains_key("content-type") || headers.contains_key("content-length"),
         )?;
-        let pkey = self.keys.get(&signature_input.keyid).ok_or_else(|| ApplicationError::new(crate::model::apperror::ErrorType::SignatureVerification, "Key not found".to_string()))?;
+        let pkey = self.keys.get(&signature_input.keyid).ok_or_else(|| HttpSignaturesError::KeyNotFound { keyid: signature_input.keyid.clone() })?;
         Self::verify(signature_input.alg.as_str(), pkey, signature_input.get_signature_base().as_bytes(), &signature)?;
         Ok(())
     }
@@ -78,8 +73,8 @@ impl HttpSignaturesServicee {
      * # Returns
      * A `Result` containing the extracted signature or an error if the format is invalid.
      */
-    fn get_signature(signature: &str) -> Result<String, ApplicationError> {
-        between(signature, "sig=:", ":").map(|s| s.to_string()).ok_or_else(|| ApplicationError::new(crate::model::apperror::ErrorType::SignatureVerification, "Invalid signature format".to_string()))
+    fn get_signature(signature: &str) -> Result<String, HttpSignaturesError> {
+        between(signature, "sig=:", ":").map(|s| s.to_string()).ok_or_else(|| HttpSignaturesError::InvalidSignatureFormat)
     }
 
     /**
@@ -94,53 +89,61 @@ impl HttpSignaturesServicee {
      * # Returns
      * A `Result` indicating success or failure of the verification.
      */
-    fn verify(algorithm: &str, pkey: &Vec<u8>, signature_base: &[u8], signature: &[u8]) -> Result<(), ApplicationError> {
-        let result = match algorithm.to_lowercase().as_str() {
+    fn verify(algorithm: &str, pkey: &Vec<u8>, signature_base: &[u8], signature: &[u8]) -> Result<(), HttpSignaturesError> {
+        match algorithm.to_lowercase().as_str() {
             "rsa-pss-sha512" => {
                 let public_key = ring::signature::UnparsedPublicKey::new(&RSA_PSS_2048_8192_SHA512, &pkey);
                 public_key
                     .verify(signature_base, signature)
-                    .map_err(|_| ApplicationError::new(crate::model::apperror::ErrorType::SignatureVerification, "Signature verification failed".to_string()))?;
-                true
+                    .map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
             }
             "rsa-v1_5-sha256" => {
                 let public_key = ring::signature::UnparsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256, &pkey);
                 public_key
                     .verify(signature_base, signature)
-                    .map_err(|_| ApplicationError::new(crate::model::apperror::ErrorType::SignatureVerification, "Signature verification failed".to_string()))?;
-                true
-            }
-            "hmac-sha256" => {
-                return Err(ApplicationError::new(
-                    crate::model::apperror::ErrorType::SignatureVerification,
-                    "hmac-sha256 is not supported in this implementation, please use hmac-sha512 instead".to_string(),
-                ));
+                    .map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
             }
             "ecdsa-p256-sha256" => {
                 let public_key = ring::signature::UnparsedPublicKey::new(&ECDSA_P256_SHA256_ASN1, &pkey);
                 public_key
                     .verify(signature_base, signature)
-                    .map_err(|_| ApplicationError::new(crate::model::apperror::ErrorType::SignatureVerification, "Signature verification failed".to_string()))?;
-                true
+                    .map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
             }
             "ecdsa-p384-sha384" => {
                 let public_key = ring::signature::UnparsedPublicKey::new(&ECDSA_P384_SHA384_ASN1, &pkey);
                 public_key
                     .verify(signature_base, signature)
-                    .map_err(|_| ApplicationError::new(crate::model::apperror::ErrorType::SignatureVerification, "Signature verification failed".to_string()))?;
-                true
+                    .map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
             }
             "ed25519" => {
                 let public_key = ring::signature::UnparsedPublicKey::new(&ED25519, &pkey);
                 public_key
                     .verify(signature_base.as_ref(), signature.as_ref())
-                    .map_err(|_| ApplicationError::new(crate::model::apperror::ErrorType::SignatureVerification, "Signature verification failed".to_string()))?;
-                true
+                    .map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
             }
-            _ => return Err(ApplicationError::new(crate::model::apperror::ErrorType::SignatureVerification, "Unsupported signature algorithm".to_string())),
+            _ => return Err(HttpSignaturesError::UnsupportedAlgorithm { algorithm: algorithm.to_string() }),
         };
-        if result { Ok(()) } else { Err(ApplicationError::new(crate::model::apperror::ErrorType::SignatureVerification, "Signature verification failed".to_string())) }
+        Ok(())
     }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum HttpSignaturesError {
+    InvalidSignatureFormat,
+    KeyNotFound{ keyid: String },
+    MissingExpiresTimestamp,
+    MissingSignatureHeader,
+    MissingSignatureInputHeader,
+    MissingCreatedTimestamp,
+    MissingRequiredHeader,
+    MissingRequiredDerivedValue,
+    MissingAlgorithm,
+    MissingKeyId,
+    MissingHeaderInRequest{ name: String },
+    NoSignatureElements,
+    SignatureVerificationFailed,
+    SignatureExpired { expired: usize },
+    UnsupportedAlgorithm{ algorithm: String },
 }
 
 /**
@@ -278,16 +281,15 @@ impl SignatureInput {
      * A `SignatureInput` struct containing the parsed elements.
      */
     fn new(
-        headers: &HeaderMap,
+        headers: &HashMap<String, String>,
         method: &str,
         request_target: &str,
         requirements: HashSet<VerificationRequirement>,
         has_body: bool,
-    ) -> Result<Self, ApplicationError> {
+    ) -> Result<Self, HttpSignaturesError> {
         let signature_input = headers
-            .get("Signature-Input")
-            .and_then(|h| h.to_str().ok())
-            .ok_or_else(|| ApplicationError::new(crate::model::apperror::ErrorType::SignatureVerification, "Missing Signature input header".to_string()))?;
+            .get("signature-input")
+            .ok_or_else(|| HttpSignaturesError::MissingSignatureInputHeader)?;
 
         let (sig, alg, keyid, created, expires) = Self::get_signature_elements(headers, method, request_target, signature_input);
         Self::verify_created_requirement(&requirements, created)?;
@@ -379,7 +381,7 @@ impl SignatureInput {
      * # Returns
      * A tuple containing the updated signature elements, algorithm, key ID, created timestamp, and expires timestamp.
      */
-    fn get_signature_elements(headers: &HeaderMap, method: &str, request_target: &str, signature_input: &str) -> (Vec<SignatureElementEnum>, String, String, Option<usize>, Option<usize>) {
+    fn get_signature_elements(headers: &HashMap<String, String>, method: &str, request_target: &str, signature_input: &str) -> (Vec<SignatureElementEnum>, String, String, Option<usize>, Option<usize>) {
         let mut sig = Vec::new();
         let mut alg = String::new();
         let mut keyid = String::new();
@@ -398,7 +400,7 @@ impl SignatureInput {
                     } else {
                         sig.push(SignatureElementEnum::HeaderString {
                             name: element.to_string().to_lowercase(),
-                            value: headers.get(element).and_then(|v| v.to_str().ok()).unwrap_or_default().to_string(),
+                            value: headers.get(element).unwrap_or(&"".into()).to_string(),
                         });
                     }
                 }
@@ -423,11 +425,11 @@ impl SignatureInput {
      * `created`: The created timestamp from the signature input.
      *
      * # Returns
-     * Ok if the created requirement is satisfied, otherwise an `ApplicationError`.
+     * Ok if the created requirement is satisfied, otherwise an `HttpSignaturesError`.
      */
-    fn verify_created_requirement(requirements: &HashSet<VerificationRequirement>, created: Option<usize>) -> Result<(), ApplicationError> {
+    fn verify_created_requirement(requirements: &HashSet<VerificationRequirement>, created: Option<usize>) -> Result<(), HttpSignaturesError> {
         if requirements.contains(&VerificationRequirement::CreatedRequired) && created.is_none() {
-            return Err(ApplicationError::new(crate::model::apperror::ErrorType::SignatureVerification, "Missing created timestamp".to_string()));
+            return Err(HttpSignaturesError::MissingCreatedTimestamp);
         }
         Ok(())
     }
@@ -440,11 +442,11 @@ impl SignatureInput {
      * `expires`: The expires timestamp from the signature input.
      *
      * # Returns
-     * Ok if the expires requirement is satisfied, otherwise an `ApplicationError`.
+     * Ok if the expires requirement is satisfied, otherwise an `HttpSignaturesError`.
      */
-    fn verify_expires_requirement(requirements: &HashSet<VerificationRequirement>, expires: Option<usize>) -> Result<(), ApplicationError> {
+    fn verify_expires_requirement(requirements: &HashSet<VerificationRequirement>, expires: Option<usize>) -> Result<(), HttpSignaturesError> {
         if requirements.contains(&VerificationRequirement::ExpiresRequired) && expires.is_none() {
-            return Err(ApplicationError::new(crate::model::apperror::ErrorType::SignatureVerification, "Missing expires timestamp".to_string()));
+            return Err(HttpSignaturesError::MissingExpiresTimestamp);
         }
         Ok(())
     }
@@ -456,11 +458,11 @@ impl SignatureInput {
      * `sig`: The signature elements to verify.
      *
      * # Returns
-     * Ok if the signature elements are not empty, otherwise an `ApplicationError`.
+     * Ok if the signature elements are not empty, otherwise an `HttpSignaturesError`.
      */
-    fn verify_empty_signature_elements(sig: &[SignatureElementEnum]) -> Result<(), ApplicationError> {
+    fn verify_empty_signature_elements(sig: &[SignatureElementEnum]) -> Result<(), HttpSignaturesError> {
         if sig.is_empty() {
-            return Err(ApplicationError::new(crate::model::apperror::ErrorType::SignatureVerification, "No signature elements found".to_string()));
+            return Err(HttpSignaturesError::NoSignatureElements);
         }
         Ok(())
     }
@@ -474,9 +476,9 @@ impl SignatureInput {
      * `sig`: The signature elements to verify.
      *
      * # Returns
-     * Ok if the body headers are verified, otherwise an `ApplicationError`.
+     * Ok if the body headers are verified, otherwise an `HttpSignaturesError`.
      */
-    fn verify_body_headers(requirements: &HashSet<VerificationRequirement>, has_body: bool, sig: &[SignatureElementEnum]) -> Result<(), ApplicationError> {
+    fn verify_body_headers(requirements: &HashSet<VerificationRequirement>, has_body: bool, sig: &[SignatureElementEnum]) -> Result<(), HttpSignaturesError> {
         if has_body {
             let body_reqs = requirements.iter().all(|f| {
                 match f {
@@ -489,7 +491,7 @@ impl SignatureInput {
                 }
             });
             if !body_reqs {
-                return Err(ApplicationError::new(crate::model::apperror::ErrorType::SignatureVerification, "Missing required body headers in signature".to_string()));
+                return Err(HttpSignaturesError::MissingRequiredHeader);
             }
         }
         Ok(())
@@ -503,9 +505,9 @@ impl SignatureInput {
      * `sig`: The signature elements to verify.
      *
      * # Returns
-     * Ok if all required headers are present, otherwise an `ApplicationError`.
+     * Ok if all required headers are present, otherwise an `HttpSignaturesError`.
      */
-    fn verify_headers(requirements: &HashSet<VerificationRequirement>, sig: &[SignatureElementEnum]) -> Result<(), ApplicationError> {
+    fn verify_headers(requirements: &HashSet<VerificationRequirement>, sig: &[SignatureElementEnum]) -> Result<(), HttpSignaturesError> {
         let header_reqs = requirements.iter().all(|f| {
             match f {
                 VerificationRequirement::HeaderRequired { name } => {
@@ -517,7 +519,7 @@ impl SignatureInput {
             }
         });
         if !header_reqs {
-            return Err(ApplicationError::new(crate::model::apperror::ErrorType::SignatureVerification, "Missing required header in signature".to_string()));
+            return Err(HttpSignaturesError::MissingRequiredHeader);
         }
         Ok(())
     }
@@ -530,9 +532,9 @@ impl SignatureInput {
      * `sig`: The signature elements to verify.
      *
      * # Returns
-     * Ok if all required derived values are present, otherwise an `ApplicationError`.
+     * Ok if all required derived values are present, otherwise an `HttpSignaturesError`.
      */
-    fn verify_derived(requirements: &HashSet<VerificationRequirement>, sig: &[SignatureElementEnum]) -> Result<(), ApplicationError> {
+    fn verify_derived(requirements: &HashSet<VerificationRequirement>, sig: &[SignatureElementEnum]) -> Result<(), HttpSignaturesError> {
         let derived_reqs = requirements.iter().all(|f| {
             match f {
                 VerificationRequirement::DerivedRequired { name } => {
@@ -549,7 +551,7 @@ impl SignatureInput {
             }
         });
         if !derived_reqs {
-            return Err(ApplicationError::new(crate::model::apperror::ErrorType::SignatureVerification, "Missing required derived value in signature".to_string()));
+            return Err(HttpSignaturesError::MissingRequiredDerivedValue);
         }
         Ok(())
     }
@@ -562,13 +564,13 @@ impl SignatureInput {
      * `expires`: The expires timestamp from the signature input.
      *
      * # Returns
-     * An `Ok(())` if the signature is valid, or an `ApplicationError` if it is not.
+     * An `Ok(())` if the signature is valid, or an `HttpSignaturesError` if it is not.
      */
-    fn check_expired(requirements: HashSet<VerificationRequirement>, expires: Option<usize>) -> Result<(), ApplicationError> {
+    fn check_expired(requirements: HashSet<VerificationRequirement>, expires: Option<usize>) -> Result<(), HttpSignaturesError> {
         if requirements.contains(&VerificationRequirement::CheckExpired) {
             if let Some(expiry) = expires {
                 if expiry < chrono::Utc::now().timestamp() as usize {
-                    return Err(ApplicationError::new(crate::model::apperror::ErrorType::SignatureVerification, "Signature has expired".to_string()));
+                    return Err(HttpSignaturesError::SignatureExpired { expired: expiry });
                 }
             }
         }
@@ -582,11 +584,11 @@ impl SignatureInput {
      * `alg`: The algorithm string from the signature input.
      *
      * # Returns
-     * An `Ok(())` if the algorithm is valid, or an `ApplicationError` if it is not.
+     * An `Ok(())` if the algorithm is valid, or an `HttpSignaturesError` if it is not.
      */
-    fn verify_algorithm(alg: &str) -> Result<(), ApplicationError> {
+    fn verify_algorithm(alg: &str) -> Result<(), HttpSignaturesError> {
         if alg.is_empty() {
-            return Err(ApplicationError::new(crate::model::apperror::ErrorType::SignatureVerification, "Missing algorithm in signature".to_string()));
+            return Err(HttpSignaturesError::MissingAlgorithm);
         }
         Ok(())
     }
@@ -598,11 +600,11 @@ impl SignatureInput {
     * `keyid`: The key ID string from the signature input.
     *
     * # Returns
-    * An `Ok(())` if the key ID is valid, or an `ApplicationError` if it is not.
+    * An `Ok(())` if the key ID is valid, or an `HttpSignaturesError` if it is not.
     */
-    fn verify_keyid(keyid: &str) -> Result<(), ApplicationError> {
+    fn verify_keyid(keyid: &str) -> Result<(), HttpSignaturesError> {
         if keyid.is_empty() {
-            return Err(ApplicationError::new(crate::model::apperror::ErrorType::SignatureVerification, "Missing keyid in signature".to_string()));
+            return Err(HttpSignaturesError::MissingKeyId);
         }
         Ok(())
     }
@@ -615,13 +617,13 @@ impl SignatureInput {
      * `sig`: The signature elements to verify.
      *
      * # Returns
-     * Ok if all required headers are present, otherwise an `ApplicationError`.
+     * Ok if all required headers are present, otherwise an `HttpSignaturesError`.
      */
-    fn verify_request_headers(headers: &HeaderMap, sig: &Vec<SignatureElementEnum>) -> Result<(), ApplicationError> {
+    fn verify_request_headers(headers: &HashMap<String, String>, sig: &Vec<SignatureElementEnum>) -> Result<(), HttpSignaturesError> {
         for element in sig {
             if let SignatureElementEnum::HeaderString { name, .. } = element {
                 if !headers.contains_key(name) {
-                    return Err(ApplicationError::new(crate::model::apperror::ErrorType::SignatureVerification, format!("Required header is missing from request: {name}")));
+                    return Err(HttpSignaturesError::MissingHeaderInRequest { name: name.clone() });
                 }
             }
         }
@@ -660,7 +662,6 @@ mod test {
         fs,
     };
 
-    use actix_web::http::header::{HeaderMap, HeaderName, HeaderValue};
     use ring::{
         rand::SystemRandom,
         signature::{ECDSA_P256_SHA256_ASN1_SIGNING, ECDSA_P384_SHA384_ASN1_SIGNING, EcdsaKeyPair, Ed25519KeyPair, KeyPair, RSA_PKCS1_SHA256, RSA_PSS_SHA512, RsaKeyPair},
@@ -673,10 +674,10 @@ mod test {
         let requirements: HashSet<VerificationRequirement> = HashSet::new();
         assert!(
             SignatureInput::new(
-                &into_headermap(vec![
-                    ("date", "Tue"),
-                    ("content-digest", "ghghgh"),
-                    ("Signature-Input", "sig=(\"date\" \"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"keyid\";created=1754334782;expires=1754335082")
+                &HashMap::from([
+                    ("date".to_string(), "Tue".to_string()),
+                    ("content-digest".to_string(), "ghghgh".to_string()),
+                    ("signature-input".to_string(), "sig=(\"date\" \"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"keyid\";created=1754334782;expires=1754335082".to_string())
                 ]),
                 "POST",
                 "/api/v1/resource",
@@ -686,8 +687,8 @@ mod test {
             .is_ok()
         );
         assert_eq!(
-            SignatureInput::new(&into_headermap(vec![]), "POST", "/api/v1/resource", requirements.clone(), false).unwrap_err().message,
-            "Missing Signature input header"
+            SignatureInput::new(&HashMap::from([]), "POST", "/api/v1/resource", requirements.clone(), false).unwrap_err(),
+            HttpSignaturesError::MissingSignatureInputHeader
         );
     }
 
@@ -697,18 +698,17 @@ mod test {
         requirements.insert(VerificationRequirement::CreatedRequired);
         assert_eq!(
             SignatureInput::new(
-                &into_headermap(vec![(
-                    "Signature-Input",
-                    "sig=(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"keyid\";expires=1754335082"
+                &HashMap::from([(
+                    "signature-input".to_string(),
+                    "sig=(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"keyid\";expires=1754335082".to_string()
                 )]),
                 "POST",
                 "/api/v1/resource",
                 requirements.clone(),
                 false
             )
-            .unwrap_err()
-            .message,
-            "Missing created timestamp"
+            .unwrap_err(),
+            HttpSignaturesError::MissingCreatedTimestamp
         );
     }
 
@@ -718,18 +718,17 @@ mod test {
         requirements.insert(VerificationRequirement::ExpiresRequired);
         assert_eq!(
             SignatureInput::new(
-                &into_headermap(vec![(
-                    "Signature-Input",
-                    "sig=(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"keyid\";created=1754334782"
+                &HashMap::from([(
+                    "signature-input".to_string(),
+                    "sig=(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"keyid\";created=1754334782".to_string()
                 )]),
                 "POST",
                 "/api/v1/resource",
                 requirements.clone(),
                 false
             )
-            .unwrap_err()
-            .message,
-            "Missing expires timestamp"
+            .unwrap_err(),
+            HttpSignaturesError::MissingExpiresTimestamp
         );
     }
 
@@ -739,18 +738,17 @@ mod test {
         requirements.insert(VerificationRequirement::HeaderRequired { name: "accept".into() });
         assert_eq!(
             SignatureInput::new(
-                &into_headermap(vec![(
-                    "Signature-Input",
-                    "sig=(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"keyid\";created=1754334782;expires=0"
+                &HashMap::from([(
+                    "signature-input".to_string(),
+                    "sig=(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"keyid\";created=1754334782;expires=0".to_string()
                 )]),
                 "POST",
                 "/api/v1/resource",
                 requirements.clone(),
                 false
             )
-            .unwrap_err()
-            .message,
-            "Missing required header in signature"
+            .unwrap_err(),
+            HttpSignaturesError::MissingRequiredHeader
         );
     }
 
@@ -760,19 +758,18 @@ mod test {
         requirements.insert(VerificationRequirement::HeaderRequiredIfBodyPresent { name: "content-length".into() });
         assert_eq!(
             SignatureInput::new(
-                &into_headermap(vec![
-                    ("date", "Tue"),
-                    ("content-digest", "ghghgh"),
-                    ("Signature-Input", "sig=(\"date\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"keyid\";created=1754334782;expires=0")
+                &HashMap::from([
+                    ("date".to_string(), "Tue".to_string()),
+                    ("content-digest".to_string(), "ghghgh".to_string()),
+                    ("signature-input".to_string(), "sig=(\"date\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"keyid\";created=1754334782;expires=0".to_string())
                 ]),
                 "POST",
                 "/api/v1/resource",
                 requirements.clone(),
                 true
             )
-            .unwrap_err()
-            .message,
-            "Missing required body headers in signature"
+            .unwrap_err(),
+            HttpSignaturesError::MissingRequiredHeader
         );
     }
 
@@ -782,18 +779,17 @@ mod test {
         requirements.insert(VerificationRequirement::HeaderRequired { name: "date".into() });
         assert_eq!(
             SignatureInput::new(
-                &into_headermap(vec![
-                    ("content-digest", "ghghgh"),
-                    ("Signature-Input", "sig=(\"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"keyid\";created=1754334782;expires=1754335082")
+                &HashMap::from([
+                    ("content-digest".to_string(), "ghghgh".to_string()),
+                    ("signature-input".to_string(), "sig=(\"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"keyid\";created=1754334782;expires=1754335082".to_string())
                 ]),
                 "POST",
                 "/api/v1/resource",
                 requirements.clone(),
                 false
             )
-            .unwrap_err()
-            .message,
-            "Missing required header in signature"
+            .unwrap_err(),
+            HttpSignaturesError::MissingRequiredHeader
         );
     }
 
@@ -804,18 +800,17 @@ mod test {
         requirements.insert(VerificationRequirement::DerivedRequired { name: "@request-target".into() });
         assert_eq!(
             SignatureInput::new(
-                &into_headermap(vec![
-                    ("content-digest", "ghghgh"),
-                    ("Signature-Input", "sig=(\"content-digest\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"keyid\";created=1754334782;expires=1754335082")
+                &HashMap::from([
+                    ("content-digest".to_string(), "ghghgh".to_string()),
+                    ("signature-input".to_string(), "sig=(\"content-digest\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"keyid\";created=1754334782;expires=1754335082".to_string())
                 ]),
                 "POST",
                 "/api/v1/resource",
                 requirements.clone(),
                 false
             )
-            .unwrap_err()
-            .message,
-            "Missing required derived value in signature"
+            .unwrap_err(),
+            HttpSignaturesError::MissingRequiredDerivedValue
         );
     }
 
@@ -825,18 +820,17 @@ mod test {
         requirements.insert(VerificationRequirement::CheckExpired);
         assert_eq!(
             SignatureInput::new(
-                &into_headermap(vec![
-                    ("content-digest", "ghghgh"),
-                    ("Signature-Input", "sig=(\"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"keyid\";created=1754334782;expires=1554335082")
+                &HashMap::from([
+                    ("content-digest".to_string(), "ghghgh".to_string()),
+                    ("signature-input".to_string(), "sig=(\"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"keyid\";created=1754334782;expires=1554335082".to_string())
                 ]),
                 "POST",
                 "/api/v1/resource",
                 requirements.clone(),
                 false
             )
-            .unwrap_err()
-            .message,
-            "Signature has expired"
+            .unwrap_err(),
+            HttpSignaturesError::SignatureExpired { expired: 1554335082 }
         );
     }
 
@@ -851,18 +845,17 @@ mod test {
         requirements.insert(VerificationRequirement::DerivedRequired { name: "@request-target".into() });
         assert_eq!(
             SignatureInput::new(
-                &into_headermap(vec![
-                    ("content-digest", "ghghgh"),
-                    ("Signature-Input", "sig=(\"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"keyid\";created=1754334782;expires=1954335082")
+                &HashMap::from([
+                    ("content-digest".to_string(), "ghghgh".to_string()),
+                    ("signature-input".to_string(), "sig=(\"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"keyid\";created=1754334782;expires=1954335082".to_string())
                 ]),
                 "POST",
                 "/api/v1/resource",
                 requirements.clone(),
                 false
             )
-            .unwrap_err()
-            .message,
-            "Missing required header in signature"
+            .unwrap_err(),
+            HttpSignaturesError::MissingRequiredHeader
         );
     }
 
@@ -881,15 +874,15 @@ mod test {
     async fn test_signature_input_with_body() {
         let requirements: HashSet<VerificationRequirement> = HashSet::new();
 
-        let mut headers = HeaderMap::new();
+        let mut headers: HashMap<String, String> = HashMap::new();
         headers.insert(
-            HeaderName::from_static("signature-input"),
-            "sig=(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754065546;expires=1754066746".parse().unwrap(),
+            "signature-input".to_string(),
+            "sig=(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754065546;expires=1754066746".to_string(),
         );
-        headers.insert(HeaderName::from_static("content-type"), "application/json".parse().unwrap());
-        headers.insert(HeaderName::from_static("content-digest"), "SHA-256=:qqlAJmTxpB9A67xSyZk+tmrrNmYClY/fqig7ceZNsSM=:".parse().unwrap());
-        headers.insert(HeaderName::from_static("date"), "Mon, 01 Jan 2024 00:00:00 GMT".parse().unwrap());
-        headers.insert(HeaderName::from_static("created"), "1754065546".parse().unwrap());
+        headers.insert("content-type".to_string(), "application/json".to_string());
+        headers.insert("content-digest".to_string(), "SHA-256=:qqlAJmTxpB9A67xSyZk+tmrrNmYClY/fqig7ceZNsSM=:".to_string());
+        headers.insert("date".to_string(), "Mon, 01 Jan 2024 00:00:00 GMT".to_string());
+        headers.insert("created".to_string(), "1754065546".to_string());
         let method = "POST";
         let request_target = "/api/v1/resource";
 
@@ -921,13 +914,13 @@ mod test {
     async fn test_signature_input_no_body() {
         let requirements: HashSet<VerificationRequirement> = HashSet::new();
 
-        let mut headers = HeaderMap::new();
+        let mut headers: HashMap<String, String> = HashMap::new();
         headers.insert(
-            HeaderName::from_static("signature-input"),
-            "sig=(\"date\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754175188;expires=1754175488".parse().unwrap(),
+            "signature-input".to_string(),
+            "sig=(\"date\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754175188;expires=1754175488".to_string(),
         );
-        headers.insert(HeaderName::from_static("date"), "Mon, 01 Jan 2024 00:00:00 GMT".parse().unwrap());
-        headers.insert(HeaderName::from_static("created"), "1754065546".parse().unwrap());
+        headers.insert("date".to_string(), "Mon, 01 Jan 2024 00:00:00 GMT".to_string());
+        headers.insert("created".to_string(), "1754065546".to_string());
         let method = "POST";
         let request_target = "/api/v1/resource";
 
@@ -965,18 +958,19 @@ mod test {
             "\"date\": Tue, 20 Apr 2021 02:07:55 GMT\n\"content-type\": application/json\n\"content-digest\": sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:\n\"@method\": {method}\n\"@request-target\": {request_target}"
         );
         let mut signature_result = vec![0; key_pair.public().modulus_len()];
+        println!("Signature string: \n{signature_str}");
         key_pair.sign(&RSA_PSS_SHA512, &rand, signature_str.as_bytes(), &mut signature_result).unwrap();
         let signature = STANDARD.encode(&signature_result);
 
-        let mut headers = HeaderMap::new();
+        let mut headers: HashMap<String, String> = HashMap::new();
         headers.insert(
-            HeaderName::from_static("signature-input"),
-            "sig=(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754409493;expires=1754409793".parse().unwrap(),
+            "signature-input".to_string(),
+            "sig=(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754409493;expires=1754409793".to_string(),
         );
-        headers.insert(HeaderName::from_static("signature"), format!("sig=:{signature}:").parse().unwrap());
-        headers.insert(HeaderName::from_static("content-type"), "application/json".parse().unwrap());
-        headers.insert(HeaderName::from_static("content-digest"), "sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:".parse().unwrap());
-        headers.insert(HeaderName::from_static("date"), "Tue, 20 Apr 2021 02:07:55 GMT".parse().unwrap());
+        headers.insert("signature".to_string(), format!("sig=:{signature}:").to_string());
+        headers.insert("content-type".to_string(), "application/json".to_string());
+        headers.insert("content-digest".to_string(), "sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:".to_string());
+        headers.insert("date".to_string(), "Tue, 20 Apr 2021 02:07:55 GMT".to_string());
 
         let mut keys: HashMap<String, Vec<u8>> = HashMap::new();
         keys.insert("key123".to_string(), key_pair.public().as_ref().to_vec());
@@ -1003,15 +997,15 @@ mod test {
         key_pair.sign(&RSA_PKCS1_SHA256, &rand, signature_str.as_bytes(), &mut signature_result).unwrap();
         let signature = STANDARD.encode(&signature_result);
 
-        let mut headers = HeaderMap::new();
+        let mut headers: HashMap<String, String> = HashMap::new();
         headers.insert(
-            HeaderName::from_static("signature-input"),
-            "sig=(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-v1_5-sha256\";keyid=\"key123\";created=1754409493;expires=1754409793".parse().unwrap(),
+            "signature-input".to_string(),
+            "sig=(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-v1_5-sha256\";keyid=\"key123\";created=1754409493;expires=1754409793".to_string(),
         );
-        headers.insert(HeaderName::from_static("signature"), format!("sig=:{signature}:").parse().unwrap());
-        headers.insert(HeaderName::from_static("content-type"), "application/json".parse().unwrap());
-        headers.insert(HeaderName::from_static("content-digest"), "sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:".parse().unwrap());
-        headers.insert(HeaderName::from_static("date"), "Tue, 20 Apr 2021 02:07:55 GMT".parse().unwrap());
+        headers.insert("signature".to_string(), format!("sig=:{signature}:").to_string());
+        headers.insert("content-type".to_string(), "application/json".to_string());
+        headers.insert("content-digest".to_string(), "sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:".to_string());
+        headers.insert("date".to_string(), "Tue, 20 Apr 2021 02:07:55 GMT".to_string());
 
         let mut keys: HashMap<String, Vec<u8>> = HashMap::new();
         keys.insert("key123".to_string(), key_pair.public().as_ref().to_vec());
@@ -1036,15 +1030,15 @@ mod test {
         );
         let signature = STANDARD.encode(key_pair.sign(&rand, signature_str.as_bytes()).unwrap());
 
-        let mut headers = HeaderMap::new();
+        let mut headers: HashMap<String, String> = HashMap::new();
         headers.insert(
-            HeaderName::from_static("signature-input"),
-            "sig=(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"ecdsa-p256-sha256\";keyid=\"key123\";created=1754409493;expires=1754409793".parse().unwrap(),
+            "signature-input".to_string(),
+            "sig=(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"ecdsa-p256-sha256\";keyid=\"key123\";created=1754409493;expires=1754409793".to_string(),
         );
-        headers.insert(HeaderName::from_static("signature"), format!("sig=:{signature}:").parse().unwrap());
-        headers.insert(HeaderName::from_static("content-type"), "application/json".parse().unwrap());
-        headers.insert(HeaderName::from_static("content-digest"), "sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:".parse().unwrap());
-        headers.insert(HeaderName::from_static("date"), "Tue, 20 Apr 2021 02:07:55 GMT".parse().unwrap());
+        headers.insert("signature".to_string(), format!("sig=:{signature}:").to_string());
+        headers.insert("content-type".to_string(), "application/json".to_string());
+        headers.insert("content-digest".to_string(), "sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:".to_string());
+        headers.insert("date".to_string(), "Tue, 20 Apr 2021 02:07:55 GMT".to_string());
 
         let mut keys: HashMap<String, Vec<u8>> = HashMap::new();
         keys.insert("key123".to_string(), key_pair.public_key().as_ref().to_vec());
@@ -1069,15 +1063,15 @@ mod test {
         );
         let signature = STANDARD.encode(key_pair.sign(&rand, signature_str.as_bytes()).unwrap());
 
-        let mut headers = HeaderMap::new();
+        let mut headers: HashMap<String, String> = HashMap::new();
         headers.insert(
-            HeaderName::from_static("signature-input"),
-            "sig=(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"ecdsa-p384-sha384\";keyid=\"key123\";created=1754409493;expires=1754409793".parse().unwrap(),
+            "signature-input".to_string(),
+            "sig=(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"ecdsa-p384-sha384\";keyid=\"key123\";created=1754409493;expires=1754409793".to_string(),
         );
-        headers.insert(HeaderName::from_static("signature"), format!("sig=:{signature}:").parse().unwrap());
-        headers.insert(HeaderName::from_static("content-type"), "application/json".parse().unwrap());
-        headers.insert(HeaderName::from_static("content-digest"), "sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:".parse().unwrap());
-        headers.insert(HeaderName::from_static("date"), "Tue, 20 Apr 2021 02:07:55 GMT".parse().unwrap());
+        headers.insert("signature".to_string(), format!("sig=:{signature}:").to_string());
+        headers.insert("content-type".to_string(), "application/json".to_string());
+        headers.insert("content-digest".to_string(), "sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:".to_string());
+        headers.insert("date".to_string(), "Tue, 20 Apr 2021 02:07:55 GMT".to_string());
 
         let mut keys: HashMap<String, Vec<u8>> = HashMap::new();
         keys.insert("key123".to_string(), key_pair.public_key().as_ref().to_vec());
@@ -1103,15 +1097,15 @@ mod test {
 
         let signature = STANDARD.encode(key_pair.sign(signature_str.as_bytes()));
 
-        let mut headers = HeaderMap::new();
+        let mut headers: HashMap<String, String> = HashMap::new();
         headers.insert(
-            HeaderName::from_static("signature-input"),
-            "sig=(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"ed25519\";keyid=\"key123\";created=1754409493;expires=1754409793".parse().unwrap(),
+            "signature-input".to_string(),
+            "sig=(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"ed25519\";keyid=\"key123\";created=1754409493;expires=1754409793".to_string(),
         );
-        headers.insert(HeaderName::from_static("signature"), format!("sig=:{signature}:").parse().unwrap());
-        headers.insert(HeaderName::from_static("content-type"), "application/json".parse().unwrap());
-        headers.insert(HeaderName::from_static("content-digest"), "sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:".parse().unwrap());
-        headers.insert(HeaderName::from_static("date"), "Tue, 20 Apr 2021 02:07:55 GMT".parse().unwrap());
+        headers.insert("signature".to_string(), format!("sig=:{signature}:").to_string());
+        headers.insert("content-type".to_string(), "application/json".to_string());
+        headers.insert("content-digest".to_string(), "sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:".to_string());
+        headers.insert("date".to_string(), "Tue, 20 Apr 2021 02:07:55 GMT".to_string());
 
         let mut keys: HashMap<String, Vec<u8>> = HashMap::new();
         keys.insert("key123".to_string(), key_pair.public_key().as_ref().to_vec());
@@ -1120,12 +1114,4 @@ mod test {
         assert!(result.is_ok());
     }
 
-    fn into_headermap(headers: Vec<(&'static str, &'static str)>) -> HeaderMap {
-        let mut header_map = HeaderMap::new();
-        for (name, value) in headers {
-            let name_lower: String = name.to_owned().to_lowercase();
-            header_map.insert(HeaderName::try_from(name_lower.as_str()).unwrap(), HeaderValue::from_static(value));
-        }
-        header_map
-    }
 }
