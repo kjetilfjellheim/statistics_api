@@ -127,22 +127,74 @@ impl HttpSignaturesServicee {
     }
 }
 
+/** 
+ * Represents errors that can occur during HTTP signature processing. 
+ */
 #[derive(Clone, Debug, PartialEq)]
 pub enum HttpSignaturesError {
+    /**
+     * Error indicating that the signature format is invalid. This fails if the signature header is not of the following format: 
+     * sig=:<Base64 encoded signature>:
+     * or if the signature could not be decoded.
+     */
     InvalidSignatureFormat,
+    /**
+     * Error indicating that the key was not found. The missing keyid is provided.
+     */
     KeyNotFound{ keyid: String },
+    /**
+     * Error indicating that the expires is missing from the signature input. This is the expires= part of the signature input.
+     */ 
     MissingExpiresTimestamp,
+    /**
+     * Error indicating that the signature header is missing. 
+     */
     MissingSignatureHeader,
+    /**
+     * Error indicating that the signature input header is missing.
+     */
     MissingSignatureInputHeader,
+    /**
+     * Error indicating that the created timestamp is missing from the signature input. This is the created= part of the signature input.
+     */
     MissingCreatedTimestamp,
+    /**
+     * Error indicating that a required header is missing from the signature input.
+     */
     MissingRequiredHeader,
+    /**
+     * Error indicating that a required derived value is missing from the signature input. The derived values
+     * are the values starting with '@' in the signature input.
+     */
     MissingRequiredDerivedValue,
+    /**
+     * Error indicating that the algorithm is missing from the signature input. This is the alg= part of the signature input.
+     */
     MissingAlgorithm,
+    /**
+     * Error indicating that the keyid is missing from the signature input. This is the keyid= part of the signature input.
+     */
     MissingKeyId,
+    /**
+     * Error indicating that the request is missing a header included in the signature input.
+     */
     MissingHeaderInRequest{ name: String },
+    /**
+     * Error indicating that the signature input is empty. This means that no signature elements were found in the signature input.
+     */
     NoSignatureElements,
+    /**
+     * Error indicating that the signature verification failed. This means that the signature could not be verified against the public key.
+     * This can happen if the signature is invalid or if the public key is incorrect.
+     */
     SignatureVerificationFailed,
+    /**
+     * Error indicating that the signature has expired. The expired timestamp is provided.
+     */
     SignatureExpired { expired: usize },
+    /**
+     * Error indicating that the algorithm is unsupported. The unsupported algorithm is provided.
+     */
     UnsupportedAlgorithm{ algorithm: String },
 }
 
@@ -155,6 +207,10 @@ pub enum VerificationRequirement {
      * Represents a header that is required in the signature. 
      */
     HeaderRequired{ name: String },
+    /**
+     * Represents a header that is required in the signature if included in request. 
+     */
+    HeaderRequiredIfIncludedInRequest{ name: String },
     /**
      * Represents a header that is required in the signature if the body is present.
      */
@@ -194,6 +250,10 @@ impl std::hash::Hash for VerificationRequirement {
             VerificationRequirement::DerivedRequired { name } => {
                 state.write_u8(5);
                 name.to_lowercase().hash(state);
+            },
+            VerificationRequirement::HeaderRequiredIfIncludedInRequest { name } => {
+                state.write_u8(6);
+                name.to_lowercase().hash(state);
             }
         }
     }
@@ -202,6 +262,7 @@ impl std::hash::Hash for VerificationRequirement {
 impl PartialEq for VerificationRequirement {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
+            (Self::HeaderRequiredIfIncludedInRequest { name: l_name }, Self::HeaderRequiredIfIncludedInRequest { name: r_name }) => l_name.to_lowercase() == r_name.to_lowercase(),
             (Self::HeaderRequired { name: l_name }, Self::HeaderRequired { name: r_name }) => l_name.to_lowercase() == r_name.to_lowercase(),
             (Self::HeaderRequiredIfBodyPresent { name: l_name }, Self::HeaderRequiredIfBodyPresent { name: r_name }) => l_name.to_lowercase() == r_name.to_lowercase(),
             (Self::DerivedRequired { name: l_name }, Self::DerivedRequired { name: r_name }) => l_name.to_lowercase() == r_name.to_lowercase(),
@@ -271,13 +332,14 @@ impl SignatureInput {
     /**
      * Parses a signature input string into a `SignatureInput` struct.
      *
-     * # Arguments
+     * #Arguments
      * `headers`: Header map containing the signature input.
      * `method`: The HTTP method of the request.
      * `request_target`: The request target (URL).
      * `requirements`: Verification requirements.
-     * `has_body`: Whether the request has a body.
-     * # Returns
+     * `has_body`: Whether the request has a body.'
+     * 
+     * #Returns
      * A `SignatureInput` struct containing the parsed elements.
      */
     fn new(
@@ -297,6 +359,7 @@ impl SignatureInput {
         Self::verify_empty_signature_elements(&sig)?;
         Self::verify_body_headers(&requirements, has_body, &sig)?;
         Self::verify_headers(&requirements, &sig)?;
+        Self::verify_headers_if_included_in_request(&requirements, &sig, &headers)?;
         Self::verify_derived(&requirements, &sig)?;
         Self::check_expired(requirements, expires)?;
         Self::verify_algorithm(&alg)?;
@@ -415,6 +478,35 @@ impl SignatureInput {
             }
         }
         (sig, alg, keyid, created, expires)
+    }
+
+    /**
+     * Verifies that the required headers are present in the request.
+     *
+     * # Arguments
+     * `requirements`: The set of verification requirements.
+     * `sig`: The signature elements to verify.
+     * `headers`: The headers of the request.
+     *
+     * # Returns
+     * Ok if all required headers are present, otherwise an `HttpSignaturesError`.
+     */
+    fn verify_headers_if_included_in_request(
+        requirements: &HashSet<VerificationRequirement>,
+        sig: &[SignatureElementEnum],
+        headers: &HashMap<String, String>,
+    ) -> Result<(), HttpSignaturesError> {
+        for requirement in requirements {
+            if let VerificationRequirement::HeaderRequiredIfIncludedInRequest { name } = requirement {
+                if !headers.contains_key(name) {
+                    return Ok(());
+                }
+                if !sig.iter().any(|f| matches!(f, SignatureElementEnum::HeaderString { name: n, .. } if n == name)) {
+                    return Err(HttpSignaturesError::MissingRequiredHeader);
+                }
+            }
+        }
+        Ok(())
     }
 
     /**
@@ -831,6 +923,47 @@ mod test {
             )
             .unwrap_err(),
             HttpSignaturesError::SignatureExpired { expired: 1554335082 }
+        );
+    }
+
+    #[tokio::test]
+    async fn test_check_required_header_if_included_in_request_failure() {
+        let mut requirements: HashSet<VerificationRequirement> = HashSet::new();
+        requirements.insert(VerificationRequirement::HeaderRequiredIfIncludedInRequest { name: "accept".into() });
+        assert_eq!(
+            SignatureInput::new(
+                &HashMap::from([
+                    ("accept".to_string(), "application/json".to_string()),
+                    ("content-digest".to_string(), "ghghgh".to_string()),
+                    ("signature-input".to_string(), "sig=(\"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"keyid\";created=1754334782;expires=1554335082".to_string())
+                ]),
+                "POST",
+                "/api/v1/resource",
+                requirements.clone(),
+                false
+            )
+            .unwrap_err(),
+            HttpSignaturesError::MissingRequiredHeader
+        );
+    }
+
+    #[tokio::test]
+    async fn test_check_required_header_if_included_in_request_success() {
+        let mut requirements: HashSet<VerificationRequirement> = HashSet::new();
+        requirements.insert(VerificationRequirement::HeaderRequiredIfIncludedInRequest { name: "accept".into() });
+        assert!(
+            SignatureInput::new(
+                &HashMap::from([
+                    ("accept".to_string(), "application/json".to_string()),
+                    ("content-digest".to_string(), "ghghgh".to_string()),
+                    ("signature-input".to_string(), "sig=(\"content-digest\" \"accept\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"keyid\";created=1754334782;expires=1554335082".to_string())
+                ]),
+                "POST",
+                "/api/v1/resource",
+                requirements.clone(),
+                false
+            )
+            .is_ok()
         );
     }
 
