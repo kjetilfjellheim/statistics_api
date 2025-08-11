@@ -6,7 +6,7 @@ use ring::signature::{ECDSA_P256_SHA256_ASN1, ECDSA_P384_SHA384_ASN1, ED25519, R
 /**
  * Service for handling HTTP signatures.
  */
-pub struct HttpSignaturesServicee {
+pub struct HttpSignaturesService {
     /**
      * A set of requirements for signature verification.
      */
@@ -18,19 +18,19 @@ pub struct HttpSignaturesServicee {
     keys: HashMap<String, KeyParams>,
 }
 
-impl HttpSignaturesServicee {
+impl HttpSignaturesService {
     /**
-     * Creates a new instance of `HttpSignaturesServicee`.
+     * Creates a new instance of `HttpSignaturesService`.
      *
      * # Arguments
      * `requirements`: A set of requirements for signature verification.
      * `keys`: A map of keys used for signature verification.
      *
      * # Returns
-     * A new instance of `HttpSignaturesServicee`.  
+     * A new instance of `HttpSignaturesService`.  
      */
     pub fn new(requirements: HashSet<VerificationRequirement>, keys: HashMap<String, KeyParams>) -> Self {
-        HttpSignaturesServicee { requirements, keys }
+        HttpSignaturesService { requirements, keys }
     }
 
     /**
@@ -48,7 +48,7 @@ impl HttpSignaturesServicee {
         let signature = Self::get_signature(
             headers
                 .get("signature")
-                .ok_or_else(|| HttpSignaturesError::MissingSignatureHeader)?,
+                .ok_or(HttpSignaturesError::MissingSignatureHeader)?,
         )?;
         let signature = STANDARD.decode(signature.as_bytes()).map_err(|_| HttpSignaturesError::InvalidSignatureFormat)?;
         let signature_input = SignatureInput::new(
@@ -160,7 +160,7 @@ impl HttpSignaturesServicee {
  * Key parameters for HTTP signatures.
  */
 #[derive(Clone, Debug)]
-struct KeyParams {
+pub struct KeyParams {
     /**
      * The public key used for signature verification.
      */
@@ -424,7 +424,7 @@ impl SignatureInput {
         Self::verify_empty_signature_elements(&sig)?;
         Self::verify_body_headers(&requirements, has_body, &sig)?;
         Self::verify_headers(&requirements, &sig)?;
-        Self::verify_headers_if_included_in_request(&requirements, &sig, &headers)?;
+        Self::verify_headers_if_included_in_request(&requirements, &sig, headers)?;
         Self::verify_derived(&requirements, &sig)?;
         Self::check_expired(requirements, expires)?;
         Self::verify_algorithm(&alg)?;
@@ -1171,7 +1171,7 @@ mod test {
 
         let mut keys: HashMap<String, KeyParams> = HashMap::new();
         keys.insert("key123".to_string(), KeyParams::new(Some(key_pair.public().as_ref().to_vec()), None));
-        let service = HttpSignaturesServicee::new(requirements, keys);
+        let service = HttpSignaturesService::new(requirements, keys);
         let result = service.verify_signature(&headers, method, request_target);
         assert!(result.is_ok());
     }
@@ -1206,7 +1206,7 @@ mod test {
 
         let mut keys: HashMap<String, KeyParams> = HashMap::new();
         keys.insert("key123".to_string(), KeyParams::new(Some(key_pair.public().as_ref().to_vec()), None));
-        let service = HttpSignaturesServicee::new(requirements, keys);
+        let service = HttpSignaturesService::new(requirements, keys);
         let result = service.verify_signature(&headers, method, request_target);
         assert!(result.is_ok());
     }
@@ -1239,7 +1239,7 @@ mod test {
 
         let mut keys: HashMap<String, KeyParams> = HashMap::new();
         keys.insert("key123".to_string(), KeyParams::new(Some(key_pair.public_key().as_ref().to_vec()), None));
-        let service = HttpSignaturesServicee::new(requirements, keys);
+        let service = HttpSignaturesService::new(requirements, keys);
         let result = service.verify_signature(&headers, method, request_target);
         assert!(result.is_ok());
     }
@@ -1272,7 +1272,7 @@ mod test {
 
         let mut keys: HashMap<String, KeyParams> = HashMap::new();
         keys.insert("key123".to_string(), KeyParams::new(Some(key_pair.public_key().as_ref().to_vec()), None));
-        let service = HttpSignaturesServicee::new(requirements, keys);
+        let service = HttpSignaturesService::new(requirements, keys);
         let result = service.verify_signature(&headers, method, request_target);
         assert!(result.is_ok());
     }
@@ -1306,7 +1306,7 @@ mod test {
 
         let mut keys: HashMap<String, KeyParams> = HashMap::new();
         keys.insert("key123".to_string(), KeyParams::new(Some(key_pair.public_key().as_ref().to_vec()), None));
-        let service = HttpSignaturesServicee::new(requirements, keys);
+        let service = HttpSignaturesService::new(requirements, keys);
         let result = service.verify_signature(&headers, method, request_target);
         assert!(result.is_ok());
     }
@@ -1336,7 +1336,7 @@ mod test {
 
         let mut keys: HashMap<String, KeyParams> = HashMap::new();
         keys.insert("key123".to_string(), KeyParams::new(None, Some("TestHMACKey".to_string())));
-        let service = HttpSignaturesServicee::new(requirements, keys);
+        let service = HttpSignaturesService::new(requirements, keys);
         let result = service.verify_signature(&headers, method, request_target);
         assert!(result.is_ok());
     }
