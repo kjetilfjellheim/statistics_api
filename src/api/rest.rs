@@ -456,7 +456,7 @@ impl ResponseError for ApplicationError {
 fn get_statuscode(application_error: &ErrorType) -> StatusCode {
     match application_error {
         ErrorType::Validation | ErrorType::DigestVerification => StatusCode::BAD_REQUEST,
-        ErrorType::JwtAuthorization | ErrorType::SignatureVerification => StatusCode::UNAUTHORIZED,
+        ErrorType::SignatureVerification => StatusCode::UNAUTHORIZED,
         ErrorType::Initialization | ErrorType::DatabaseError | ErrorType::Application => StatusCode::INTERNAL_SERVER_ERROR,
         ErrorType::NotFound => StatusCode::NOT_FOUND,
         ErrorType::ConstraintViolation => StatusCode::CONFLICT,
@@ -474,7 +474,6 @@ fn get_statuscode(application_error: &ErrorType) -> StatusCode {
  */
 fn get_error_code(application_error: &ErrorType) -> u16 {
     match application_error {
-        ErrorType::JwtAuthorization => 1000,
         ErrorType::Initialization => 1001,
         ErrorType::DatabaseError => 1003,
         ErrorType::Validation => 1004,
@@ -537,7 +536,6 @@ mod test {
 
     #[test]
     fn test_get_error_codes() {
-        assert_eq!(get_error_code(&ErrorType::JwtAuthorization), 1000);
         assert_eq!(get_error_code(&ErrorType::Initialization), 1001);
         assert_eq!(get_error_code(&ErrorType::DatabaseError), 1003);
         assert_eq!(get_error_code(&ErrorType::Validation), 1004);
@@ -549,7 +547,7 @@ mod test {
     #[test]
     fn test_get_status_codes() {
         assert_eq!(get_statuscode(&ErrorType::Validation), StatusCode::BAD_REQUEST);
-        assert_eq!(get_statuscode(&ErrorType::JwtAuthorization), StatusCode::UNAUTHORIZED);
+        assert_eq!(get_statuscode(&ErrorType::SignatureVerification), StatusCode::UNAUTHORIZED);
         assert_eq!(get_statuscode(&ErrorType::Initialization), StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(get_statuscode(&ErrorType::DatabaseError), StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(get_statuscode(&ErrorType::NotFound), StatusCode::NOT_FOUND);

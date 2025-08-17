@@ -1,5 +1,9 @@
+use std::collections::{HashMap, HashSet};
+
 use clap::{Parser, command};
 use serde::{Deserialize, Serialize};
+
+use crate::api::httpsignatures::VerificationRequirement;
 
 /**
  * Command-line arguments for the application.
@@ -109,13 +113,27 @@ pub enum DatabaseType {
 #[serde(rename_all = "camelCase")]
 pub struct AppSecurity {
     /**
-     * JWT SECRET used for verifying tokens. This can be a public key file or a secret string.
+     * Path to the public key files used for verifying HTTP signatures.
+     * Key is the keyid.
      */
-    pub jwt_secret: String,
+    pub secrets: HashMap<String, SecretType>,
     /**
-     * JWT algorithm used for signing tokens.
+     * Input security configuration.
      */
-    pub jwt_algorithm: String,
+    pub input_requirements: HashSet<VerificationRequirement>,
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub enum SecretType {
+    /**
+     * Public key file.
+     */
+    PublicKeyFile { path: String },
+    /**
+     * Shared secret for hmac.
+     */
+    SharedSecret { secret: String },
 }
 
 /**
@@ -163,7 +181,26 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_config_serialization() {
+    fn test_config_serialization_http_signatures() {
+        let http_signatures = AppSecurity {
+            secrets: HashMap::from([
+                ("key1".to_string(), SecretType::PublicKeyFile { path: "./test_config/public_keys/public_key1.pem".to_string() }),
+                ("key2".to_string(), SecretType::PublicKeyFile { path: "./test_config/public_keys/public_key2.pem".to_string() }),
+                ("key3".to_string(), SecretType::SharedSecret { secret: "test".to_string() }),
+            ]),
+            input_requirements: HashSet::from([
+                VerificationRequirement::HeaderRequired { name: "x-request-ID".to_string() },
+                VerificationRequirement::HeaderRequired { name: "x-fd-userid".to_string() },
+                VerificationRequirement::HeaderRequiredIfBodyPresent { name: "content-digest".to_string() },
+                VerificationRequirement::CreatedRequired,
+                VerificationRequirement::ExpiresRequired,
+                VerificationRequirement::CheckExpired,
+                VerificationRequirement::DerivedRequired { name: "@method".to_string() },
+                VerificationRequirement::DerivedRequired { name: "@path".to_string() },
+                VerificationRequirement::DerivedRequired { name: "@authority".to_string() },
+            ]),
+        };
+
         let config = Config {
             logging: LoggingConfig::default(),
             database: Database {
@@ -177,15 +214,24 @@ mod test {
                     max_lifetime: 3600,
                 },
             },
-            security: AppSecurity { jwt_secret: "/tmp/config/jwt_public_key.pem".to_string(), jwt_algorithm: "RS256".to_string() },
+            security: http_signatures,
             server: Server { workers: 4, http_port: Some(8080), https_config: None },
         };
         let serialized = toml::to_string(&config).unwrap();
         let deserialized: Config = toml::from_str(&serialized).unwrap();
-        assert_eq!(config.security.jwt_secret, deserialized.security.jwt_secret);
-        assert_eq!(config.security.jwt_algorithm, deserialized.security.jwt_algorithm);
+        assert_eq!(config.logging.target, deserialized.logging.target);
+        assert_eq!(config.logging.thread_ids, deserialized.logging.thread_ids);
+        assert_eq!(config.logging.line_number, deserialized.logging.line_number);
+        assert_eq!(config.logging.level, deserialized.logging.level);
+        assert_eq!(config.logging.ansi, deserialized.logging.ansi);
+        assert_eq!(config.logging.file, deserialized.logging.file);
+        assert_eq!(config.logging.logfile, deserialized.logging.logfile);
+        assert_eq!(config.logging.directives, deserialized.logging.directives);
         assert_eq!(config.server.workers, deserialized.server.workers);
         assert_eq!(config.server.http_port, deserialized.server.http_port);
         assert!(deserialized.server.https_config.is_none());
+        assert_eq!(deserialized.security.secrets.get("key1").unwrap(), &SecretType::PublicKeyFile { path: "./test_config/public_keys/public_key1.pem".to_string() });
+        assert_eq!(deserialized.security.secrets.get("key2").unwrap(), &SecretType::PublicKeyFile { path: "./test_config/public_keys/public_key2.pem".to_string() });
+        assert_eq!(deserialized.security.secrets.get("key3").unwrap(), &SecretType::SharedSecret { secret: "test".to_string() });
     }
 }

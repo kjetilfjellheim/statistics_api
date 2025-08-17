@@ -1,0 +1,53 @@
+[logging]
+target = true
+thread_ids = true
+thread_names = false
+line_number = false
+level = true
+ansi = false
+file = false
+logfile = "./logs/app.log"
+directives = ["sqlx::query=info",]
+
+[security]
+inputRequirements = [
+"CheckExpired", 
+{ DerivedRequired = { name = "@method" } }, 
+{ HeaderRequired = { name = "x-request-id" } }, 
+"CreatedRequired", 
+{ HeaderRequired = { name = "x-fd-userid" } }, 
+"ExpiresRequired", 
+]
+
+[security.secrets.key1.publicKeyFile]
+path = "./test_config/keys/public_key1.pem"
+
+[security.secrets.key2.publicKeyFile]
+path = "./test_config/keys/public_key2.pem"
+
+[security.secrets.key3.sharedSecret]
+secret = "test"
+
+[security.secrets.key4.publicKeyFile]
+path = "./test_config/keys/public_key4.pem"
+
+[security.secrets.key5.publicKeyFile]
+path = "./test_config/keys/public_key5.pem"
+
+[security.secrets.key6.publicKeyFile]
+path = "./test_config/keys/public_key6.pem"
+
+[server]
+workers = 50
+httpPort = 8080
+
+[database.dbType.postgresql]
+connectionString = ""
+maxConnections = 50
+minConnections = 5
+acquireTimeout = 6000
+acquireSlowThreshold = 3000
+idleTimeout = 3000
+maxLifetime = 36000
+
+

@@ -8,7 +8,7 @@
         "cwd": "${workspaceFolder}",
         "args": [
             "--config-file",
-            "./test_config/simple_http.toml"
+            "./test_config/simple_http_signatures.toml"
         ],
         "env": {
             "RUST_BACKTRACE": "1",

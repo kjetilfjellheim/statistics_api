@@ -17,7 +17,7 @@ futures-util = "0.3.31" # For async utilities
 jsonwebtoken = "9.3.1" # For JWT handling
 toml = "0.9.5" # For reading configuration files
 clap = { version = "4.5.45", features = ["derive"]} # For command line argument parsing
-rustls = { version = "0.23.31" } # For TLS support
+rustls = { version = "0.23.31", features = [] } # For TLS support
 rustls-pemfile = "2.2.0" # For handling PEM files
 chrono = { version = "0.4.41", features = ["serde"] } # For date and time handling
 sqlx = { version = "0.8.6", features = [ "runtime-tokio", "postgres", "macros", "rust_decimal", "chrono", "migrate" ] } # For PostgreSQL support with SQLx
@@ -28,12 +28,15 @@ tracing = "0.1.41" # For structured logging
 tracing-subscriber = { version = "0.3.19", features = ["fmt", "env-filter"] } # For tracing subscriber
 uuid = { version = "1.18.0", features = ["v4"] } # For generating unique identifiers when trace id is missing.
 sha2 = "0.10.9" # For SHA-256 hashing
-ring = { version = "0.17.11" } # Signature verification library
+openssl = { version = "0.10.73", features = ["vendored"] } # For OpenSSL support in tests
+hmac = { version = "0.12.1" } # HMAC support
 
 [dev-dependencies]
 dotenv = "0.15.0" # For loading environment variables from a .env file
-openssl = { version = "0.10.73", features = ["vendored"] } # For OpenSSL support in tests
 rustls-pki-types = "1.12.0" # For PKI types in Rustls
+pem = "3.0.5" # For PEM file handling
+ring = { version = "0.17.11", features = [ ]} # Signature verification library
+
 
 [profile.release]
 lto = true  # Performs “fat” LTO which attempts to perform optimizations across all crates within the dependency graph.

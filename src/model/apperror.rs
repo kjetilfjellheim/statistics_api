@@ -6,7 +6,6 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq)]
 pub enum ErrorType {
     Initialization,
-    JwtAuthorization,
     DatabaseError,
     NotFound,
     Application,

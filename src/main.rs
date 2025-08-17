@@ -3,15 +3,16 @@ mod dao;
 mod model;
 mod service;
 
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
+use std::{fs, thread};
 
+use crate::api::httpsignatures::{HttpSignaturesService, KeyParams};
 use crate::api::middleware;
-use crate::api::security::JwtSecurityService;
 use crate::dao::statistics::StatisticsDao;
 use crate::model::apperror::{ApplicationError, ErrorType};
-use crate::model::config::{AppSecurity, ApplicationArguments, DatabaseType, HttpsConfig};
+use crate::model::config::{AppSecurity, ApplicationArguments, DatabaseType, HttpsConfig, SecretType};
 
 use crate::api::endpoints::{municipalities_add, municipalities_delete, municipalities_list, statistics_add, statistics_delete, statistics_list, value_add, value_delete, value_update, values_list};
 use crate::api::state::AppState;
@@ -44,7 +45,7 @@ async fn main() -> std::io::Result<()> {
 
     // Initialize logging
     tracing_subscriber::fmt()
-        .compact()
+        .pretty()
         .with_writer(log_file)
         .with_env_filter(filter)
         .with_target(config.logging.target)
@@ -70,12 +71,12 @@ async fn main() -> std::io::Result<()> {
     };
     let connection_pool = Arc::new(connection_pool);
 
-    let jwt_service = get_jwt_service(&config.security)?;
+    let http_signatures_service = get_security_service(&config.security)?;
 
     let statistics_dao = StatisticsDao::new();
     let statistics_service = StatisticsService::new(statistics_dao, connection_pool.clone());
 
-    let state = web::Data::new(AppState::new(jwt_service.clone(), statistics_service));
+    let state = web::Data::new(AppState::new(http_signatures_service, statistics_service));
 
     let prometheus = PrometheusMetricsBuilder::new("")
         .endpoint("/metrics/prometheus")
@@ -101,7 +102,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(prometheus.clone())
             .wrap(from_fn(middleware::timing_middleware))
             .wrap(from_fn(middleware::digest_verification_middleware))
-            .wrap(Logger::new("%a %r %s %b %{Referer}i %{User-Agent}i %{X-Request-id}i %Dms"))
+            .wrap(Logger::new("\"%{x-request-id}i\" \"%{Referer}i\" \"%{User-Agent}i\" %a \"%r\" %s %b %T"))
             .app_data(state.clone())
             .service(statistics_list)
             .service(statistics_add)
@@ -216,15 +217,25 @@ fn get_config(config_file: &str) -> Result<model::config::Config, std::io::Error
 }
 
 /**
- * Initializes the JWT security service using the provided configuration.
+ * Initializes the security service for HTTP signatures.
  *
  * #Arguments
- * `jwt_config`: The JWT security configuration containing the public key and algorithm.
+ * `app_security`: Application security configuration containing secrets and input requirements.
  *
  * #Returns
- * A `Result` containing the initialized `JwtSecurityService` or an `std::io::Error` if initialization fails.
+ * A `Result` containing the initialized `HttpSignaturesService` or an `std::io::Error` if initialization fails.
  */
-fn get_jwt_service(jwt_config: &AppSecurity) -> Result<JwtSecurityService, std::io::Error> {
-    let pub_key = std::fs::read_to_string(&jwt_config.jwt_secret).map_err(|err| std::io::Error::other(format!("Failed to read public key file: {err}")))?;
-    JwtSecurityService::new(&pub_key, &jwt_config.jwt_algorithm).map_err(|err| std::io::Error::other(format!("Failed to create JWT service: {err}")))
+fn get_security_service(app_security: &AppSecurity) -> Result<HttpSignaturesService, std::io::Error> {
+    let keys = app_security
+        .secrets
+        .iter()
+        .map(|(keyid, secret_type)| match secret_type {
+            SecretType::PublicKeyFile { path } => {
+                let der_file_contents = fs::read(path).map_err(|err| std::io::Error::other(format!("Failed to read public key file: {err}")))?;
+                Ok((keyid.clone(), KeyParams::new(Some(der_file_contents), None)))
+            }
+            SecretType::SharedSecret { secret } => Ok((keyid.clone(), KeyParams::new(None, Some(secret.clone())))),
+        })
+        .collect::<Result<HashMap<String, KeyParams>, std::io::Error>>()?;
+    Ok(HttpSignaturesService::new(app_security.input_requirements.clone(), keys))
 }

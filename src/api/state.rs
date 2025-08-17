@@ -1,13 +1,13 @@
-use crate::{api::security::JwtSecurityService, service::statistics::StatisticsService};
+use crate::{api::httpsignatures::HttpSignaturesService, service::statistics::StatisticsService};
 
 /**
 * Represents the application state shared across the Actix web application.
 */
 pub struct AppState {
     /**
-     * The JWT security service for handling authentication and authorization.
+     * The security service for handling authentication and authorization.
      */
-    pub jwt_service: JwtSecurityService,
+    pub security_service: HttpSignaturesService,
     /**
      * The statistics service for handling statistics-related operations.
      */
@@ -18,12 +18,12 @@ pub struct AppState {
  * Creates a new instance of `AppState`.
  *
  * # Arguments
- * `jwt_service`: The JWT security service for handling authentication and authorization.
+ * `security_service`: The security service for handling authentication and authorization.
  * `config`: The application configuration.
  * `statistics_service`: The statistics service for handling statistics-related operations.
  */
 impl AppState {
-    pub fn new(jwt_service: JwtSecurityService, statistics_service: StatisticsService) -> Self {
-        AppState { jwt_service, statistics_service }
+    pub fn new(security_service: HttpSignaturesService, statistics_service: StatisticsService) -> Self {
+        AppState { security_service, statistics_service }
     }
 }

@@ -1,0 +1,27 @@
+key1 = rsa
+key2 = rsa
+key4 = ed25519
+key5 = ecdsa-256
+key6 = ecdsa-384
+
+Commands
+
+openssl genrsa -out private_key1.pem 2048
+openssl pkcs8 -topk8 -inform PEM -outform DER -in private_key1.pem -out private_key1.pk8 -nocrypt
+openssl rsa -in private_key1.pem -pubout -out public_key1.pem
+
+openssl genrsa -out private_key2.pem 4096
+openssl pkcs8 -topk8 -inform PEM -outform DER -in private_key2.pem -out private_key2.pk8 -nocrypt
+openssl rsa -in private_key2.pem -pubout -out public_key2.pem
+
+openssl genpkey -algorithm Ed25519 -out private_key4.pem
+openssl pkcs8 -topk8 -inform PEM -outform DER -in private_key4.pem -out private_key4.pk8 -nocrypt
+openssl pkey -in private_key4.pem -pubout -out public_key4.pem
+
+openssl ecparam -name prime256v1 -genkey -noout -out -private_key5.pem
+openssl pkcs8 -topk8 -inform PEM -outform DER -nocrypt -in private_key5.pem -out private_key5.pk8
+openssl ec -in private_key5.pem -pubout -out public_key5.pem
+
+openssl ecparam -name secp384r1 -genkey -noout -out -private_key6.pem
+openssl pkcs8 -topk8 -inform PEM -outform DER -nocrypt -in private_key6.pem -out private_key6.pk8
+openssl ec -in private_key6.pem -pubout -out public_key6.pem
