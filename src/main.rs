@@ -102,6 +102,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(prometheus.clone())
             .wrap(from_fn(middleware::timing_middleware))
             .wrap(from_fn(middleware::digest_verification_middleware))
+            .wrap(from_fn(middleware::signature_verification_middleware))
             .wrap(Logger::new("\"%{x-request-id}i\" \"%{Referer}i\" \"%{User-Agent}i\" %a \"%r\" %s %b %T"))
             .app_data(state.clone())
             .service(statistics_list)

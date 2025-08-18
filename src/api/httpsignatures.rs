@@ -23,14 +23,14 @@ const SIGNATURE_ALGORITHM_HMAC_SHA256: &str = "hmac-sha256";
  */
 pub struct HttpSignaturesService {
     /**
-     * A set of requirements for signature verification.
+     * A set of requirements for input signature verification.
      */
-    requirements: HashSet<VerificationRequirement>,
+    input_verification_requirements: HashSet<VerificationRequirement>,
     /**
      * A map of keys used for signature verification. The key ID is used to look up the public key.
      * The key ID is expected to be in the `keyid` field of the signature input.
      */
-    keys: HashMap<String, KeyParams>,
+    input_keys: HashMap<String, KeyParams>,
 }
 
 impl HttpSignaturesService {
@@ -38,14 +38,14 @@ impl HttpSignaturesService {
      * Creates a new instance of `HttpSignaturesService`.
      *
      * # Arguments
-     * `requirements`: A set of requirements for signature verification.
-     * `keys`: A map of keys used for signature verification.
+     * `input_verification_requirements`: A set of requirements for signature verification.
+     * `input_keys`: A map of keys used for signature verification.
      *
      * # Returns
      * A new instance of `HttpSignaturesService`.  
      */
-    pub fn new(requirements: HashSet<VerificationRequirement>, keys: HashMap<String, KeyParams>) -> Self {
-        HttpSignaturesService { requirements, keys }
+    pub fn new(input_verification_requirements: HashSet<VerificationRequirement>, input_keys: HashMap<String, KeyParams>) -> Self {
+        HttpSignaturesService { input_verification_requirements, input_keys }
     }
 
     /**
@@ -65,10 +65,10 @@ impl HttpSignaturesService {
         let signature_input = SignatureInput::new(
             headers,
             derive_elements,
-            self.requirements.clone(),
+            self.input_verification_requirements.clone(),
             headers.contains_key("content-digest") || headers.contains_key("content-type") || headers.contains_key("content-length"),
         )?;
-        let pkey = self.keys.get(&signature_input.keyid).ok_or(HttpSignaturesError::KeyNotFound { keyid: signature_input.keyid.clone() })?;
+        let pkey = self.input_keys.get(&signature_input.keyid).ok_or(HttpSignaturesError::KeyNotFound { keyid: signature_input.keyid.clone() })?;
         Self::verify(signature_input.alg.as_str(), pkey, signature_input.get_signature_base().as_bytes(), &signature)?;
         Ok(())
     }
