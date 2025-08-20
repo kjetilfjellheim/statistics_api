@@ -1,11 +1,21 @@
 use actix_web::{
-    body::MessageBody, dev::{Payload, ServiceRequest, ServiceResponse}, middleware::Next, web::{self, Bytes}, Error, HttpRequest
+    Error, HttpRequest,
+    body::MessageBody,
+    dev::{Payload, ServiceRequest, ServiceResponse},
+    middleware::Next,
+    web::{self, Bytes},
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use tracing::{debug, info};
 
-use crate::{api::{httpsignatures::{convert_headers_to_lowercase, DeriveElements}, state::AppState}, model::apperror::{ApplicationError, ErrorType}};
+use crate::{
+    api::{
+        httpsignatures::{DeriveInputElements, convert_headers_to_lowercase},
+        state::AppState,
+    },
+    model::apperror::{ApplicationError, ErrorType},
+};
 
 /**
  * Middleware for timing requests.
@@ -52,18 +62,17 @@ pub async fn digest_verification_middleware(mut request: ServiceRequest, next: N
  * If the signature is valid, it allows the request to proceed; otherwise, it returns an error.
  */
 pub async fn signature_verification_middleware(app_state: web::Data<AppState>, request: ServiceRequest, next: Next<impl MessageBody>) -> Result<ServiceResponse<impl MessageBody>, Error> {
-    verify_signature(&request.request(), &app_state)?;
+    verify_signature(request.request(), &app_state)?;
     return next.call(request).await;
 }
-
 
 /**
  * Verifies the signature of the HTTP request.
  */
 fn verify_signature(http_request: &HttpRequest, app_state: &AppState) -> Result<(), ApplicationError> {
-    app_state.security_service.verify_signature(&convert_headers_to_lowercase(&http_request.headers()), &DeriveElements::from(http_request)).map_err(|err| {
-        info!("Signature verification failed: {:?}", err);
-        ApplicationError::new(ErrorType::SignatureVerification, format!("Signature verification failed"))
+    app_state.security_service.verify_signature(&convert_headers_to_lowercase(http_request.headers()), &DeriveInputElements::from(http_request)).map_err(|err| {
+        info!("Signature verification failed: {err:?}");
+        ApplicationError::new(ErrorType::SignatureVerification, "Signature verification failed".to_string())
     })
 }
 
@@ -94,8 +103,6 @@ fn verify_digest(digest: &str, body: &[u8]) -> Result<(), ApplicationError> {
     let result = STANDARD.encode(hash_result);
     if result == expected_hash { Ok(()) } else { Err(ApplicationError::new(crate::model::apperror::ErrorType::DigestVerification, "Digest verification failed".to_string())) }
 }
-
-
 
 #[cfg(test)]
 mod test {

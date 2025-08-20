@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use actix_web::{HttpRequest, http::header::HeaderMap};
+use actix_web::{http::header::HeaderMap, HttpRequest, HttpResponse};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use hmac::{Hmac, Mac};
 use openssl::hash::MessageDigest;
@@ -58,7 +58,7 @@ impl HttpSignaturesService {
      * # Returns
      * A `Result` indicating success or failure of the verification.
      */
-    pub fn verify_signature(&self, headers: &HashMap<String, String>, derive_elements: &DeriveElements) -> Result<(), HttpSignaturesError> {
+    pub fn verify_signature(&self, headers: &HashMap<String, String>, derive_elements: &DeriveInputElements) -> Result<(), HttpSignaturesError> {
         debug!("Verifying signature with headers: {:?}", headers);
         let signature = Self::get_signature(headers.get("signature").ok_or(HttpSignaturesError::MissingSignatureHeader)?)?;
         let signature = STANDARD.decode(signature.as_bytes()).map_err(|_| HttpSignaturesError::InvalidSignatureFormat)?;
@@ -182,82 +182,62 @@ impl HttpSignaturesService {
 
 /**
  * Derived elements for HTTP signatures. These elements are used to derive the signature base string.
- * They are typically derived from the HTTP request method, target URI, and other request components.
+ * They are typically derived from the HTTP request or response.
  */
 #[derive(Debug, Clone)]
-pub struct DeriveElements {
+pub struct DeriveInputElements {
     /**
      * The method derived element.
      */
-    pub method: String,
+    pub method: Option<String>,
     /**
      * The request target derived element.
      */
-    pub request_target: String,
+    pub request_target: Option<String>,
     /**
      * The path derived element.
      */
-    pub path: String,
+    pub path: Option<String>,
     /**
      * The target URI derived element.
      */
-    pub target_uri: String,
+    pub target_uri: Option<String>,
     /**
      * The authority derived element.
      */
-    pub authority: String,
+    pub authority: Option<String>,
     /**
      * The scheme derived element.
      */
-    pub scheme: String,
+    pub scheme: Option<String>,
     /**
      * The query derived element.
      */
-    pub query: String,
+    pub query: Option<String>,
+    /**
+     * The status of the response.
+     */
+    pub status: Option<u16>,
 }
 
-impl DeriveElements {
+impl DeriveInputElements {
     /**
-     * Creates a new instance of `DeriveElements`.
+     * Creates a new instance of `DeriveInputElements`.
      *
      * # Returns
-     * A new instance of `DeriveElements`.
+     * A new instance of `DeriveInputElements`.
      */
-    pub fn new(method: &str, request_target: &str, path: &str, target_uri: &str, authority: &str, scheme: &str, query: &str) -> Self {
-        DeriveElements {
-            method: method.to_string(),
-            request_target: request_target.to_string(),
-            path: path.to_string(),
-            target_uri: target_uri.to_string(),
-            authority: authority.to_string(),
-            scheme: scheme.to_string(),
-            query: query.to_string(),
+    pub fn new(method: Option<&str>, request_target: Option<&str>, path: Option<&str>, target_uri: Option<&str>, authority: Option<&str>, scheme: Option<&str>, query: Option<&str>, status: Option<u16>) -> Self {
+        DeriveInputElements {
+            method: method.map(|m| m.to_string()),
+            request_target: request_target.map(|r| r.to_string()),
+            path: path.map(|p| p.to_string()),
+            target_uri: target_uri.map(|t| t.to_string()),
+            authority: authority.map(|a| a.to_string()),
+            scheme: scheme.map(|s| s.to_string()),
+            query: query.map(|q| q.to_string()),
+            status,
         }
-    }
-}
-
-impl From<&HttpRequest> for DeriveElements {
-    /**
-     * Converts an `HttpRequest` into `DeriveElements`.
-     *
-     * # Arguments
-     * `http_request`: The HTTP request to derive elements from.
-     *
-     * # Returns
-     * A new instance of `DeriveElements` derived from the HTTP request.
-     */
-    fn from(http_request: &HttpRequest) -> Self {
-        let derive_elements = DeriveElements::new(
-            http_request.method().as_str(),
-            http_request.uri().path_and_query().map_or("/", |p| p.as_str()),
-            http_request.uri().path(),
-            http_request.uri().path_and_query().map_or("/", |p| p.as_str()),
-            http_request.full_url().authority(),
-            http_request.uri().scheme_str().unwrap_or("http"),
-            http_request.uri().query().unwrap_or(""),
-        );
-        debug!("Derived Elements: {:?}", derive_elements);
-        derive_elements
     }
 }
 
@@ -401,6 +381,7 @@ pub enum VerificationRequirement {
      * Derived component that is required in the signature.
      */
     DerivedRequired { name: String },
+
 }
 
 /**
@@ -434,6 +415,9 @@ enum SignatureElementEnum {
         value: String,
     },
     Scheme {
+        value: String,
+    },
+    Status {
         value: String,
     },
 }
@@ -484,7 +468,7 @@ impl SignatureInput {
      * #Returns
      * A `SignatureInput` struct containing the parsed elements.
      */
-    fn new(headers: &HashMap<String, String>, derive_elements: &DeriveElements, requirements: HashSet<VerificationRequirement>, has_body: bool) -> Result<Self, HttpSignaturesError> {
+    fn new(headers: &HashMap<String, String>, derive_elements: &DeriveInputElements, requirements: HashSet<VerificationRequirement>, has_body: bool) -> Result<Self, HttpSignaturesError> {
         let signature_input = headers.get("signature-input").ok_or(HttpSignaturesError::MissingSignatureInputHeader)?;
 
         let (sig, alg, keyid, created, expires) = Self::get_signature_elements(headers, derive_elements, signature_input);
@@ -541,6 +525,9 @@ impl SignatureInput {
                 SignatureElementEnum::Scheme { value: _ } => {
                     signature_params.push_str("\"@scheme\"");
                 }
+                SignatureElementEnum::Status { value: _ } => {
+                    signature_params.push_str("\"@status\"");
+                }
             }
         }
         signature_params.push_str(");alg=\"");
@@ -592,6 +579,9 @@ impl SignatureInput {
                 SignatureElementEnum::Scheme { value } => {
                     signature_base.push_str(&format!("\"@scheme\": {value}"));
                 }
+                SignatureElementEnum::Status { value } => {
+                    signature_base.push_str(&format!("\"@status\": {}", value));
+                }
             }
         }
         signature_base.push('\n');
@@ -611,7 +601,7 @@ impl SignatureInput {
      * # Returns
      * A tuple containing the updated signature elements, algorithm, key ID, created timestamp, and expires timestamp.
      */
-    fn get_signature_elements(headers: &HashMap<String, String>, derive_elements: &DeriveElements, signature_input: &str) -> (Vec<SignatureElementEnum>, String, String, Option<usize>, Option<usize>) {
+    fn get_signature_elements(headers: &HashMap<String, String>, derive_elements: &DeriveInputElements, signature_input: &str) -> (Vec<SignatureElementEnum>, String, String, Option<usize>, Option<usize>) {
         let mut sig = Vec::new();
         let mut alg = String::new();
         let mut keyid = String::new();
@@ -644,25 +634,27 @@ impl SignatureInput {
      * # Returns
      * Vector of derived signatutre elements.
      */
-    fn parse_signature_element(headers: &HashMap<String, String>, derive_elements: &DeriveElements, part: &str) -> Vec<SignatureElementEnum> {
+    fn parse_signature_element(headers: &HashMap<String, String>, derive_elements: &DeriveInputElements, part: &str) -> Vec<SignatureElementEnum> {
         let mut sig = Vec::new();
         let value = between(part, "sig=(", ")").unwrap_or_default();
         for element in value.replace("\"", "").split_whitespace() {
             if element.starts_with('@') {
                 if element == "@method" {
-                    sig.push(SignatureElementEnum::Method { value: derive_elements.method.clone() });
+                    sig.push(SignatureElementEnum::Method { value: derive_elements.method.clone().unwrap_or_default() });
                 } else if element == "@request-target" {
-                    sig.push(SignatureElementEnum::RequestTarget { value: derive_elements.request_target.clone() });
+                    sig.push(SignatureElementEnum::RequestTarget { value: derive_elements.request_target.clone().unwrap_or_default() });
                 } else if element == "@query" {
-                    sig.push(SignatureElementEnum::Query { value: derive_elements.query.clone() });
+                    sig.push(SignatureElementEnum::Query { value: derive_elements.query.clone().unwrap_or_default() });
                 } else if element == "@path" {
-                    sig.push(SignatureElementEnum::Path { value: derive_elements.path.clone() });
+                    sig.push(SignatureElementEnum::Path { value: derive_elements.path.clone().unwrap_or_default() });
                 } else if element == "@target-uri" {
-                    sig.push(SignatureElementEnum::TargetUri { value: derive_elements.target_uri.clone() });
+                    sig.push(SignatureElementEnum::TargetUri { value: derive_elements.target_uri.clone().unwrap_or_default() });
                 } else if element == "@authority" {
-                    sig.push(SignatureElementEnum::Authority { value: derive_elements.authority.clone() });
+                    sig.push(SignatureElementEnum::Authority { value: derive_elements.authority.clone().unwrap_or_default() });
                 } else if element == "@scheme" {
-                    sig.push(SignatureElementEnum::Scheme { value: derive_elements.scheme.clone() });
+                    sig.push(SignatureElementEnum::Scheme { value: derive_elements.scheme.clone().unwrap_or_default() });
+                } else if element == "@status" {
+                    sig.push(SignatureElementEnum::Status { value: derive_elements.status.clone().unwrap_or_default().to_string() });
                 }
             } else {
                 sig.push(SignatureElementEnum::HeaderString { name: element.to_string().to_lowercase(), value: headers.get(element).unwrap_or(&"".into()).to_string() });
@@ -961,8 +953,8 @@ mod test {
     use super::*;
 
     #[tokio::test]
-    async fn test_missing_signature() {
-        let derive_elements = DeriveElements::new("POST", "/api/v1/resource", "", "", "", "", "");
+    async fn test_missing_request_signature() {
+        let derive_elements = DeriveInputElements::new(Some("POST"), Some("/api/v1/resource"), None, None, None, None, None, None);
         let requirements: HashSet<VerificationRequirement> = HashSet::new();
         assert!(
             SignatureInput::new(
@@ -984,8 +976,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_missing_created() {
-        let derive_elements = DeriveElements::new("POST", "/api/v1/resource", "", "", "", "", "");
+    async fn test_missing_request_created() {
+        let derive_elements = DeriveInputElements::new(Some("POST"), Some("/api/v1/resource"), None, None, None, None, None, None);
         let mut requirements: HashSet<VerificationRequirement> = HashSet::new();
         requirements.insert(VerificationRequirement::CreatedRequired);
         assert_eq!(
@@ -1004,8 +996,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_missing_expires() {
-        let derive_elements = DeriveElements::new("POST", "/api/v1/resource", "", "", "", "", "");
+    async fn test_missing_request_expires() {
+        let derive_elements = DeriveInputElements::new(Some("POST"), Some("/api/v1/resource"), None, None, None, None, None, None);
         let mut requirements: HashSet<VerificationRequirement> = HashSet::new();
         requirements.insert(VerificationRequirement::ExpiresRequired);
         assert_eq!(
@@ -1024,8 +1016,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_missing_accept() {
-        let derive_elements = DeriveElements::new("POST", "/api/v1/resource", "", "", "", "", "");
+    async fn test_missing_request_accept() {
+        let derive_elements = DeriveInputElements::new(Some("POST"), Some("/api/v1/resource"), None, None, None, None, None, None);
         let mut requirements: HashSet<VerificationRequirement> = HashSet::new();
         requirements.insert(VerificationRequirement::HeaderRequired { name: "accept".into() });
         assert_eq!(
@@ -1044,8 +1036,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_missing_required_body_content_length() {
-        let derive_elements = DeriveElements::new("POST", "/api/v1/resource", "", "", "", "", "");
+    async fn test_request_missing_required_body_content_length() {
+        let derive_elements = DeriveInputElements::new(Some("POST"), Some("/api/v1/resource"), None, None, None, None, None, None);
         let mut requirements: HashSet<VerificationRequirement> = HashSet::new();
         requirements.insert(VerificationRequirement::HeaderRequiredIfBodyPresent { name: "content-length".into() });
         assert_eq!(
@@ -1065,8 +1057,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_missing_required_header_date() {
-        let derive_elements = DeriveElements::new("POST", "/api/v1/resource", "", "", "", "", "");
+    async fn test_request_missing_required_header_date() {
+        let derive_elements = DeriveInputElements::new(Some("POST"), Some("/api/v1/resource"), None, None, None, None, None, None);
         let mut requirements: HashSet<VerificationRequirement> = HashSet::new();
         requirements.insert(VerificationRequirement::HeaderRequired { name: "date".into() });
         assert_eq!(
@@ -1088,8 +1080,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_missing_derived() {
-        let derive_elements = DeriveElements::new("POST", "/api/v1/resource", "", "", "", "", "");
+    async fn test_request_missing_derived() {
+        let derive_elements = DeriveInputElements::new(Some("POST"), Some("/api/v1/resource"), None, None, None, None, None, None);
         let mut requirements: HashSet<VerificationRequirement> = HashSet::new();
         requirements.insert(VerificationRequirement::DerivedRequired { name: "@method".into() });
         requirements.insert(VerificationRequirement::DerivedRequired { name: "@request-target".into() });
@@ -1109,8 +1101,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_check_expired() {
-        let derive_elements = DeriveElements::new("POST", "/api/v1/resource", "", "", "", "", "");
+    async fn test_request_check_expired() {
+        let derive_elements = DeriveInputElements::new(Some("POST"), Some("/api/v1/resource"), None, None, None, None, None, None);
         let mut requirements: HashSet<VerificationRequirement> = HashSet::new();
         requirements.insert(VerificationRequirement::CheckExpired);
         assert_eq!(
@@ -1132,8 +1124,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_check_required_header_if_included_in_request_failure() {
-        let derive_elements = DeriveElements::new("POST", "/api/v1/resource", "", "", "", "", "");
+    async fn test_request_check_required_header_if_included_in_request_failure() {
+        let derive_elements = DeriveInputElements::new(Some("POST"), Some("/api/v1/resource"), None, None, None, None, None, None);
         let mut requirements: HashSet<VerificationRequirement> = HashSet::new();
         requirements.insert(VerificationRequirement::HeaderRequiredIfIncludedInRequest { name: "accept".into() });
         assert_eq!(
@@ -1156,8 +1148,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_check_required_header_if_included_in_request_success() {
-        let derive_elements = DeriveElements::new("POST", "/api/v1/resource", "", "", "", "", "");
+    async fn test_request_check_required_header_if_included_in_request_success() {
+        let derive_elements = DeriveInputElements::new(Some("POST"), Some("/api/v1/resource"), None, None, None, None, None, None);
         let mut requirements: HashSet<VerificationRequirement> = HashSet::new();
         requirements.insert(VerificationRequirement::HeaderRequiredIfIncludedInRequest { name: "accept".into() });
         assert!(
@@ -1179,8 +1171,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_full_test() {
-        let derive_elements = DeriveElements::new("POST", "/api/v1/resource", "", "", "", "", "");
+    async fn test_request_full_test() {
+        let derive_elements = DeriveInputElements::new(Some("POST"), Some("/api/v1/resource"), None, None, None, None, None, None);
 
         let mut requirements: HashSet<VerificationRequirement> = HashSet::new();
         requirements.insert(VerificationRequirement::HeaderRequired { name: "date".into() });
@@ -1219,8 +1211,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_signature_input_with_body() {
-        let derive_elements = DeriveElements::new("POST", "/api/v1/resource", "", "", "", "", "");
+    async fn test_request_signature_input_with_body() {
+        let derive_elements = DeriveInputElements::new(Some("POST"), Some("/api/v1/resource"), None, None, None, None, None, None);
 
         let requirements: HashSet<VerificationRequirement> = HashSet::new();
 
@@ -1260,8 +1252,48 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_signature_input_no_body() {
-        let derive_elements = DeriveElements::new("POST", "/api/v1/resource", "", "", "", "", "");
+    async fn test_response_signature_input_with_body() {
+        let derive_elements = DeriveInputElements::new(None, None, None, None, None, None, None, Some(200));
+
+        let requirements: HashSet<VerificationRequirement> = HashSet::new();
+
+        let mut headers: HashMap<String, String> = HashMap::new();
+        headers.insert(
+            "signature-input".to_string(),
+            "sig=(\"date\" \"content-type\" \"content-digest\" \"@status\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754065546;expires=1754066746".to_string(),
+        );
+        headers.insert("content-type".to_string(), "application/json".to_string());
+        headers.insert("content-digest".to_string(), "SHA-256=:qqlAJmTxpB9A67xSyZk+tmrrNmYClY/fqig7ceZNsSM=:".to_string());
+        headers.insert("date".to_string(), "Mon, 01 Jan 2024 00:00:00 GMT".to_string());
+        headers.insert("created".to_string(), "1754065546".to_string());
+
+        let parsed = SignatureInput::new(&headers, &derive_elements, requirements, true).unwrap();
+        assert_eq!(parsed.alg, "rsa-pss-sha512");
+        assert_eq!(parsed.keyid, "key123");
+        assert_eq!(parsed.created, Some(1754065546));
+        assert_eq!(parsed.expires, Some(1754066746));
+        assert_eq!(parsed.sig.len(), 4);
+
+        let signature_params = parsed.get_signature_params();
+        assert_eq!(
+            signature_params.as_str(),
+            "(\"date\" \"content-type\" \"content-digest\" \"@status\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754065546;expires=1754066746"
+        );
+
+        let signature_base = parsed.get_signature_base();
+        assert_eq!(
+            signature_base,
+            "\"date\": Mon, 01 Jan 2024 00:00:00 GMT
+\"content-type\": application/json
+\"content-digest\": SHA-256=:qqlAJmTxpB9A67xSyZk+tmrrNmYClY/fqig7ceZNsSM=:
+\"@status\": 200
+\"@signature-params\": (\"date\" \"content-type\" \"content-digest\" \"@status\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754065546;expires=1754066746"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_request_signature_input_no_body() {
+        let derive_elements = DeriveInputElements::new(Some("POST"), Some("/api/v1/resource"), None, None, None, None, None, None);
 
         let requirements: HashSet<VerificationRequirement> = HashSet::new();
 
@@ -1291,8 +1323,38 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_verify_success_rsa_pss_sha512() {
-        let derive_elements = DeriveElements::new("POST", "/foo?param=value&pet=dog", "", "", "", "", "");
+    async fn test_response_signature_input_no_body() {
+        let derive_elements = DeriveInputElements::new(None, None, None, None, None, None, None, Some(200));
+
+        let requirements: HashSet<VerificationRequirement> = HashSet::new();
+
+        let mut headers: HashMap<String, String> = HashMap::new();
+        headers.insert("signature-input".to_string(), "sig=(\"date\" \"@status\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754175188;expires=1754175488".to_string());
+        headers.insert("date".to_string(), "Mon, 01 Jan 2024 00:00:00 GMT".to_string());
+        headers.insert("created".to_string(), "1754065546".to_string());
+
+        let parsed = SignatureInput::new(&headers, &derive_elements, requirements, false).unwrap();
+        assert_eq!(parsed.alg, "rsa-pss-sha512");
+        assert_eq!(parsed.keyid, "key123");
+        assert_eq!(parsed.created, Some(1754175188));
+        assert_eq!(parsed.expires, Some(1754175488));
+        assert_eq!(parsed.sig.len(), 2);
+
+        let signature_params = parsed.get_signature_params();
+        assert_eq!(signature_params.as_str(), "(\"date\" \"@status\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754175188;expires=1754175488");
+
+        let signature_base = parsed.get_signature_base();
+        assert_eq!(
+            signature_base,
+            "\"date\": Mon, 01 Jan 2024 00:00:00 GMT
+\"@status\": 200
+\"@signature-params\": (\"date\" \"@status\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754175188;expires=1754175488"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_request_verify_success_rsa_pss_sha512() {
+        let derive_elements = DeriveInputElements::new(Some("POST"), Some("/foo?param=value&pet=dog"), None, None, None, None, None, None);
 
         let requirements: HashSet<VerificationRequirement> = HashSet::new();
 
@@ -1330,8 +1392,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_verify_success_rsa_v1_5_sha256() {
-        let derive_elements = DeriveElements::new("POST", "/foo?param=value&pet=dog", "", "", "", "", "");
+    async fn test_request_verify_success_rsa_v1_5_sha256() {
+        let derive_elements = DeriveInputElements::new(Some("POST"), Some("/foo?param=value&pet=dog"), None, None, None, None, None, None);
 
         let requirements: HashSet<VerificationRequirement> = HashSet::new();
 
@@ -1369,8 +1431,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_verify_success_ecdsa_p256_sha256() {
-        let derive_elements = DeriveElements::new("POST", "/foo?param=value&pet=dog", "", "", "", "", "");
+    async fn test_request_verify_success_ecdsa_p256_sha256() {
+        let derive_elements = DeriveInputElements::new(Some("POST"), Some("/foo?param=value&pet=dog"), None, None, None, None, None, None);
 
         let requirements: HashSet<VerificationRequirement> = HashSet::new();
 
@@ -1406,8 +1468,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_verify_success_ecdsa_p384_sha384() {
-        let derive_elements = DeriveElements::new("POST", "/foo?param=value&pet=dog", "", "", "", "", "");
+    async fn test_request_verify_success_ecdsa_p384_sha384() {
+        let derive_elements = DeriveInputElements::new(Some("POST"), Some("/foo?param=value&pet=dog"), None, None, None, None, None, None);
 
         let requirements: HashSet<VerificationRequirement> = HashSet::new();
 
@@ -1443,8 +1505,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_verify_success_ed25519() {
-        let derive_elements = DeriveElements::new("POST", "/foo?param=value&pet=dog", "", "", "", "", "");
+    async fn test_request_verify_success_ed25519() {
+        let derive_elements = DeriveInputElements::new(Some("POST"), Some("/foo?param=value&pet=dog"), None, None, None, None, None, None);
 
         let requirements: HashSet<VerificationRequirement> = HashSet::new();
 
@@ -1478,8 +1540,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_verify_success_hmac_sha256() {
-        let derive_elements = DeriveElements::new("POST", "/foo?param=value&pet=dog", "", "", "", "", "");
+    async fn test_request_verify_success_hmac_sha256() {
+        let derive_elements = DeriveInputElements::new(Some("POST"), Some("/foo?param=value&pet=dog"), None, None, None, None, None, None);
 
         let requirements: HashSet<VerificationRequirement> = HashSet::new();
 
@@ -1510,8 +1572,37 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_parse_signature_elements_success() {
-        let derive_elements = DeriveElements::new("POST", "/foo?param=value&pet=dog", "", "", "", "", "");
+    async fn test_response_verify_success_hmac_sha256() {
+        let derive_elements = DeriveInputElements::new(None, None, None, None, None, None, None, Some(200));
+
+        let requirements: HashSet<VerificationRequirement> = HashSet::new();
+
+        let signature_str = format!(
+            "\"date\": Tue, 20 Apr 2021 02:07:55 GMT\n\"content-type\": application/json\n\"content-digest\": sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:\n\"@status\": 200\n\"@signature-params\": (\"date\" \"content-type\" \"content-digest\" \"@status\");alg=\"hmac-sha256\";keyid=\"key123\";created=1754409493;expires=1754409793"
+        );
+
+        let signature = STANDARD.encode(ring::hmac::sign(&ring::hmac::Key::new(ring::hmac::HMAC_SHA256, b"TestHMACKey"), signature_str.as_bytes()));
+
+        let mut headers: HashMap<String, String> = HashMap::new();
+        headers.insert(
+            "signature-input".to_string(),
+            "sig=(\"date\" \"content-type\" \"content-digest\" \"@status\");alg=\"hmac-sha256\";keyid=\"key123\";created=1754409493;expires=1754409793".to_string(),
+        );
+        headers.insert("signature".to_string(), format!("sig=:{signature}:").to_string());
+        headers.insert("content-type".to_string(), "application/json".to_string());
+        headers.insert("content-digest".to_string(), "sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:".to_string());
+        headers.insert("date".to_string(), "Tue, 20 Apr 2021 02:07:55 GMT".to_string());
+
+        let mut keys: HashMap<String, KeyParams> = HashMap::new();
+        keys.insert("key123".to_string(), KeyParams::new(None, Some("TestHMACKey".to_string())));
+        let service = HttpSignaturesService::new(requirements, keys);
+        let result = service.verify_signature(&headers, &derive_elements);
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_request_parse_signature_elements_success() {
+        let derive_elements = DeriveInputElements::new(Some("POST"), Some("/foo?param=value&pet=dog"), None, None, None, None, None, None);
 
         let requirements: HashSet<VerificationRequirement> = HashSet::new();
 
@@ -1533,8 +1624,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_parse_signature_elements_success_all_derived() {
-        let derive_elements = DeriveElements::new("POST", "/foo?param=value&pet=dog", "/foo", "/foo", "example.com", "https", "?param=value&pet=dog");
+    async fn test_request_parse_signature_elements_success_all_derived() {
+        let derive_elements = DeriveInputElements::new(Some("POST"), Some("/foo?param=value&pet=dog"), Some("/foo"), Some("/foo"), Some("example.com"), Some("https"), Some("?param=value&pet=dog"), None);
 
         let requirements: HashSet<VerificationRequirement> = HashSet::new();
 
@@ -1560,7 +1651,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_generate_signature_elements_rsa() {
+    async fn test_request_generate_signature_elements_rsa() {
         let key_pair = RsaKeyPair::from_pkcs8(&fs::read("test_config/keys/private_key1.pk8").unwrap()).unwrap();
         let signature_base = "\"x-fd-userid\": 123456789
 \"x-request-id\": 78867567565464
@@ -1570,7 +1661,7 @@ mod test {
         let mut signature_result = vec![0; key_pair.public().modulus_len()];
         key_pair.sign(&RSA_PSS_SHA512, &rand, signature_base.as_bytes(), &mut signature_result).unwrap();
         let signature = STANDARD.encode(&signature_result);
-        println!("Signature: \n{:?}", signature);
+        println!("Signature: \n{signature:?}");
     }
 
     #[tokio::test]
@@ -1582,6 +1673,6 @@ mod test {
 \"@signature-params\": (\"x-fd-userid\" \"x-request-id\" \"@method\");alg=\"ed25519\";keyid=\"key4\";created=1755289691;expires=1955289991";
         let sign = key_pair.sign(signature_base.as_bytes());
         let signature = STANDARD.encode(sign.as_ref());
-        println!("Signature: \n{:?}", signature);
+        println!("Signature: \n{signature:?}");
     }
 }

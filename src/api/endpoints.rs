@@ -8,7 +8,7 @@ use crate::{
     api::{
         rest::{
             MunicipalityAddRequest, MunicipalityListResponse, PaginationQuery, StatisticsAddRequest, StatisticsListRequest, StatisticsListResponse, ValuesAddUpdateRequest, ValuesListRequest,
-            ValuesListResponse,
+            ValuesListResponse, generate_digest,
         },
         state::AppState,
     },
@@ -32,7 +32,9 @@ pub async fn statistics_list(
     let span = tracing::Span::current();
     let pagination_input = PaginationInput::from(pagination).validate()?;
     let output_values: StatisticsListOutputType = app_state.statistics_service.get_statistics_list(pagination_input).instrument(span).await?;
-    Ok(HttpResponse::Ok().json(StatisticsListResponse::from(output_values)))
+    let response =
+        serde_json::to_vec_pretty(&StatisticsListResponse::from(output_values)).map_err(|_| ApplicationError::new(ErrorType::Application, "Failed to serialize statistics list".to_string()))?;
+    Ok(HttpResponse::Ok().append_header(("Content-Digest", format!("sha-512=:{}:", generate_digest(&response)))).body(response))
 }
 
 /**
@@ -73,7 +75,9 @@ pub async fn municipalities_list(
     let span = tracing::Span::current();
     let pagination_input = PaginationInput::from(pagination).validate()?;
     let output_values = app_state.statistics_service.get_municipality_list(pagination_input).instrument(span).await?;
-    Ok(HttpResponse::Ok().json(MunicipalityListResponse::from(output_values)))
+    let response =
+        serde_json::to_vec_pretty(&MunicipalityListResponse::from(output_values)).map_err(|_| ApplicationError::new(ErrorType::Application, "Failed to serialize statistics list".to_string()))?;
+    Ok(HttpResponse::Ok().append_header(("Content-Digest", format!("sha-512=:{}:", generate_digest(&response)))).body(response))
 }
 
 /**
@@ -115,7 +119,8 @@ pub async fn values_list(
     let pagination_input = PaginationInput::from(pagination).validate()?;
     let filter_params = ValuesListInputType::from(request_body).validate()?;
     let output_values = app_state.statistics_service.get_values_list(pagination_input, filter_params).instrument(span).await?;
-    Ok(HttpResponse::Ok().json(ValuesListResponse::from(output_values)))
+    let response = serde_json::to_vec_pretty(&ValuesListResponse::from(output_values)).map_err(|_| ApplicationError::new(ErrorType::Application, "Failed to serialize values list".to_string()))?;
+    Ok(HttpResponse::Ok().append_header(("Content-Digest", format!("sha-512=:{}:", generate_digest(&response)))).body(response))
 }
 
 /**

@@ -1,12 +1,15 @@
-use actix_web::{HttpResponse, ResponseError, http::StatusCode};
+use actix_web::{http::StatusCode, HttpRequest, HttpResponse, ResponseError};
 use chrono::Utc;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha512};
+use tracing::debug;
 
-use crate::model::{
+use crate::{api::httpsignatures::DeriveInputElements, model::{
     apperror::{ApplicationError, ErrorType},
     models::{MunicipalityDetailType, MunicipalityListOutputType, PaginationOutput, StatisticDetailType, StatisticsListOutputType, ValueDetailType, ValuesListOutputType},
-};
+}};
+use base64::{Engine, engine::general_purpose::STANDARD};
 
 /***************** Municipality:list models *********************/
 
@@ -440,8 +443,96 @@ impl ResponseError for ApplicationError {
      */
     fn error_response(&self) -> HttpResponse {
         let error_response = ErrorResponse { code: get_error_code(&self.error_type), message: self.message.clone() };
-        HttpResponse::build(get_statuscode(&self.error_type.clone())).json(&error_response)
+        let binding = serde_json::to_string_pretty(&error_response)
+            .map_err(|_| ApplicationError::new(ErrorType::Application, "Failed to serialize error response".to_string()))
+            .unwrap_or_else(|_| get_serde_conversion_error());
+        let bytes = binding.into_bytes();
+        let digest = format!("sha-512=:{}:", generate_digest(&bytes));
+        HttpResponse::build(get_statuscode(&self.error_type.clone())).append_header(("Content-Digest", digest)).body(bytes)
     }
+}
+
+
+impl From<&HttpRequest> for DeriveInputElements {
+    /**
+     * Converts an `HttpRequest` into `DeriveInputElements`.
+     *
+     * # Arguments
+     * `http_request`: The HTTP request to derive elements from.
+     *
+     * # Returns
+     * A new instance of `DeriveInputElements` derived from the HTTP request.
+     */
+    fn from(http_request: &HttpRequest) -> Self {
+        let derive_elements = DeriveInputElements::new(
+            Some(http_request.method().as_str()),
+            Some(http_request.uri().path_and_query().map_or("/", |p| p.as_str())),
+            Some(http_request.uri().path()),
+            Some(http_request.uri().path_and_query().map_or("/", |p| p.as_str())),
+            Some(http_request.full_url().authority()),
+            Some(http_request.uri().scheme_str().unwrap_or("http")),
+            Some(http_request.uri().query().unwrap_or("")),
+            None
+        );
+        debug!("Derived Elements: {:?}", derive_elements);
+        derive_elements
+    }
+}
+
+
+impl From<&HttpResponse> for DeriveInputElements {
+    /**
+     * Converts an `HttpResponse` into `DeriveInputElements`.
+     *
+     * # Arguments
+     * `http_request`: The HTTP request to derive elements from.
+     *
+     * # Returns
+     * A new instance of `DeriveInputElements` derived from the HTTP response.
+     */
+    fn from(http_response: &HttpResponse) -> Self {
+        let derive_elements = DeriveInputElements::new(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(http_response.status().as_u16())
+        );
+        debug!("Derived Elements: {:?}", derive_elements);
+        derive_elements
+    }
+}
+
+
+/**
+ * Generates a SHA-512 digest of the given body.
+ *
+ * # Arguments
+ * `body`: The request body as a byte slice.
+ *
+ * # Returns
+ * A base64 encoded string of the SHA-512 digest.
+ */
+pub fn generate_digest(body: &[u8]) -> String {
+    let mut hasher = Sha512::new();
+    hasher.update(body);
+    let result = hasher.finalize();
+    STANDARD.encode(result)
+}
+
+/**
+ * Returns a default error response for serialization errors.
+ *
+ * This function is used when the application fails to convert data to a JSON format.
+ *
+ * # Returns
+ * A string representing the default error response.
+ */
+pub fn get_serde_conversion_error() -> String {
+    "{\"code\": 1006, \"message\": \"Failed to convert data\"}".to_string()
 }
 
 /**
@@ -618,5 +709,14 @@ mod test {
         assert!(detail_element.created_at.timestamp() > 0);
         assert_eq!(detail_element.updated_by, "admin");
         assert_eq!(detail_element.created_by, "admin");
+    }
+
+    #[test]
+    fn test_generate_digest() {
+        let body = b"Test body for digest generation";
+        let digest = generate_digest(body);
+        assert!(!digest.is_empty());
+        assert_eq!(digest.len(), 88); // SHA-512 base64 encoded length
+        assert_eq!(digest, "FQBDjZib7K6sZVOUimsMY9c8L9i7hss0BHVEGbNJgkTpFVjMZuJEhcuoyySLZjYgIVZ4Q5cqtgVOLyshuWrvWQ==");
     }
 }

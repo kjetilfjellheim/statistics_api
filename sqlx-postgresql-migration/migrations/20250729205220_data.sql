@@ -1,4 +1,4 @@
-INSERT INTO public.statistics (id, name, inserted_by, inserted_at) VALUES (26975, 'Popyulation municipality', 'Kjetil Fjellheim', '2025-07-28 21:39:40.4641+02');
+INSERT INTO public.statistics (id, name, inserted_by, inserted_at) VALUES (26975, 'Population municipality', 'Kjetil Fjellheim', '2025-07-28 21:39:40.4641+02');
 
 INSERT INTO public.municipality (id, name, inserted_by, inserted_at) VALUES (4206, 'Farsund', 'Kjetil Fjellheim', '2025-07-28 22:49:04.127927+02');
 INSERT INTO public.municipality (id, name, inserted_by, inserted_at) VALUES (4214, 'Froland', 'Kjetil Fjellheim', '2025-07-28 22:49:04.269907+02');

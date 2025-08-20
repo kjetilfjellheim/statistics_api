@@ -238,5 +238,5 @@ fn get_security_service(app_security: &AppSecurity) -> Result<HttpSignaturesServ
             SecretType::SharedSecret { secret } => Ok((keyid.clone(), KeyParams::new(None, Some(secret.clone())))),
         })
         .collect::<Result<HashMap<String, KeyParams>, std::io::Error>>()?;
-    Ok(HttpSignaturesService::new(app_security.input_requirements.clone(), keys))
+    Ok(HttpSignaturesService::new(app_security.incoming_verification_requirements.clone(), keys))
 }

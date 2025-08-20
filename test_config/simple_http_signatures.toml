@@ -10,13 +10,13 @@ logfile = "./logs/app.log"
 directives = ["sqlx::query=info",]
 
 [security]
-inputRequirements = [
-"CheckExpired", 
-{ DerivedRequired = { name = "@method" } }, 
-{ HeaderRequired = { name = "x-request-id" } }, 
-"CreatedRequired", 
-{ HeaderRequired = { name = "x-fd-userid" } }, 
-"ExpiresRequired", 
+incomingVerificationRequirements = [
+    "CheckExpired", 
+    { DerivedRequired = { name = "@method" } }, 
+    { HeaderRequired = { name = "x-request-id" } }, 
+    "CreatedRequired", 
+    { HeaderRequired = { name = "x-fd-userid" } }, 
+    "ExpiresRequired", 
 ]
 
 [security.secrets.key1.publicKeyFile]

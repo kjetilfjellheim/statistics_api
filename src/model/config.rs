@@ -120,7 +120,7 @@ pub struct AppSecurity {
     /**
      * Input security configuration.
      */
-    pub input_requirements: HashSet<VerificationRequirement>,
+    pub incoming_verification_requirements: HashSet<VerificationRequirement>,
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
@@ -188,7 +188,7 @@ mod test {
                 ("key2".to_string(), SecretType::PublicKeyFile { path: "./test_config/public_keys/public_key2.pem".to_string() }),
                 ("key3".to_string(), SecretType::SharedSecret { secret: "test".to_string() }),
             ]),
-            input_requirements: HashSet::from([
+            incoming_verification_requirements: HashSet::from([
                 VerificationRequirement::HeaderRequired { name: "x-request-ID".to_string() },
                 VerificationRequirement::HeaderRequired { name: "x-fd-userid".to_string() },
                 VerificationRequirement::HeaderRequiredIfBodyPresent { name: "content-digest".to_string() },
