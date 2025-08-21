@@ -1,4 +1,6 @@
-use actix_web::{http::StatusCode, HttpRequest, HttpResponse, ResponseError};
+use std::collections::HashMap;
+
+use actix_web::{http::{header::HeaderMap, StatusCode}, HttpRequest, HttpResponse, ResponseError};
 use chrono::Utc;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -452,6 +454,17 @@ impl ResponseError for ApplicationError {
     }
 }
 
+/**
+ * Converts the headers to lowercase.
+ *
+ * # Arguments
+ * `headers`: The headers to convert.
+ * # Returns
+ * A `HashMap<String, String>` containing the headers with lowercase keys.
+ */
+pub fn convert_headers_to_lowercase(headers: &HeaderMap) -> HashMap<String, String> {
+    headers.iter().map(|(k, v)| (k.as_str().to_lowercase(), v.to_str().unwrap_or("").to_string())).collect()
+}
 
 impl From<&HttpRequest> for DeriveInputElements {
     /**

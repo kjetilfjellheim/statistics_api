@@ -11,8 +11,7 @@ use tracing::{debug, info};
 
 use crate::{
     api::{
-        httpsignatures::{DeriveInputElements, convert_headers_to_lowercase},
-        state::AppState,
+        httpsignatures::DeriveInputElements, rest::convert_headers_to_lowercase, state::AppState
     },
     model::apperror::{ApplicationError, ErrorType},
 };
