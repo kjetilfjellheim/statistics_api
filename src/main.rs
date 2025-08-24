@@ -4,11 +4,12 @@ mod model;
 mod service;
 
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{fs, thread};
 
-use crate::api::httpsignatures::{HttpSignaturesService, KeyParams};
+use crate::api::httpsignatures::{Algorithm, HttpSignaturesService, SecurityKeyEnum};
 use crate::api::middleware;
 use crate::dao::statistics::StatisticsDao;
 use crate::model::apperror::{ApplicationError, ErrorType};
@@ -228,15 +229,16 @@ fn get_config(config_file: &str) -> Result<model::config::Config, std::io::Error
  */
 fn get_security_service(app_security: &AppSecurity) -> Result<HttpSignaturesService, std::io::Error> {
     let keys = app_security
-        .secrets
+        .verification_secrets
         .iter()
         .map(|(keyid, secret_type)| match secret_type {
-            SecretType::PublicKeyFile { path } => {
-                let der_file_contents = fs::read(path).map_err(|err| std::io::Error::other(format!("Failed to read public key file: {err}")))?;
-                Ok((keyid.clone(), KeyParams::new(Some(der_file_contents), None)))
+            SecretType::PublicKeyFile { path, algorithm } => {
+                let file_contents = fs::read(path).map_err(|err| std::io::Error::other(format!("Failed to read public key file: {err}")))?;
+                Ok((keyid.clone(), SecurityKeyEnum::PublicKey { contents: file_contents, algorithm: Algorithm::from_str(algorithm).map_err(|_err| std::io::Error::other(format!("Unsupported algorithm {algorithm} for keyid {keyid}")))? }))
             }
-            SecretType::SharedSecret { secret } => Ok((keyid.clone(), KeyParams::new(None, Some(secret.clone())))),
+            SecretType::SharedSecret { secret, algorithm } => Ok((keyid.clone(), SecurityKeyEnum::SharedSecret { contents: secret.clone(), algorithm: Algorithm::from_str(algorithm).map_err(|_err| std::io::Error::other(format!("Unsupported algorithm {algorithm} for keyid {keyid}")))? })),
+            _ => Err(std::io::Error::other(format!("Unsupported secret type for keyid {keyid}"))),
         })
-        .collect::<Result<HashMap<String, KeyParams>, std::io::Error>>()?;
+        .collect::<Result<HashMap<String, SecurityKeyEnum>, std::io::Error>>()?;
     Ok(HttpSignaturesService::new(app_security.incoming_verification_requirements.clone(), keys))
 }

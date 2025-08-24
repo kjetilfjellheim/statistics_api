@@ -1,8 +1,8 @@
-use std::collections::{HashMap, HashSet};
+use std::{collections::{HashMap, HashSet}, fmt::Display, str::FromStr};
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use hmac::{Hmac, Mac};
-use openssl::hash::MessageDigest;
+use openssl::{hash::MessageDigest, pkey::{PKey, Public}};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use tracing::debug;
@@ -29,7 +29,7 @@ pub struct HttpSignaturesService {
      * A map of keys used for signature verification. The key ID is used to look up the public key.
      * The key ID is expected to be in the `keyid` field of the signature input.
      */
-    input_keys: HashMap<String, KeyParams>,
+    input_keys: HashMap<String, SecurityKeyEnum>,
 }
 
 impl HttpSignaturesService {
@@ -43,7 +43,7 @@ impl HttpSignaturesService {
      * # Returns
      * A new instance of `HttpSignaturesService`.  
      */
-    pub fn new(input_verification_requirements: Option<HashSet<VerificationRequirement>>, input_keys: HashMap<String, KeyParams>) -> Self {
+    pub fn new(input_verification_requirements: Option<HashSet<VerificationRequirement>>, input_keys: HashMap<String, SecurityKeyEnum>) -> Self {
         HttpSignaturesService { input_verification_requirements, input_keys }
     }
 
@@ -68,8 +68,8 @@ impl HttpSignaturesService {
                 requirements,
                 headers.contains_key("content-digest") || headers.contains_key("content-type") || headers.contains_key("content-length"),
             )?;
-            let pkey = self.input_keys.get(&signature_input.keyid).ok_or(HttpSignaturesError::KeyNotFound { keyid: signature_input.keyid.clone() })?;
-            Self::verify(signature_input.alg.as_str(), pkey, signature_input.get_signature_base().as_bytes(), &signature)?;
+            let security_key = self.input_keys.get(&signature_input.keyid).ok_or(HttpSignaturesError::KeyNotFound { keyid: signature_input.keyid.clone() })?;
+            Self::verify(signature_input.alg.as_str(), security_key, signature_input.get_signature_base().as_bytes(), &signature)?;
             debug!("Signature verified successfully");
         }
         Ok(())
@@ -94,91 +94,80 @@ impl HttpSignaturesService {
      *
      * # Arguments
      * `algorithm`: The signature algorithm used (e.g., "RSA-PSS-SHA256").
-     * `key_params`: The key parameters for verification.
+     * `security_key`: The key parameters for verification.
      * `signature_base`: The base string to verify against the signature.
      * `signature`: The signature to verify.
      *
      * # Returns
      * A `Result` indicating success or failure of the verification.
      */
-    fn verify(algorithm: &str, key_params: &KeyParams, signature_base: &[u8], signature: &[u8]) -> Result<(), HttpSignaturesError> {
-        match algorithm.to_lowercase().as_str() {
-            SIGNATURE_ALGORITHM_RSA_PSS_SHA512 => {
-                if let Some(pkey) = &key_params.pkey {
-                    let public_key = openssl::pkey::PKey::public_key_from_pem(pkey).map_err(|_| HttpSignaturesError::MissingKeyParam)?;
-                    let mut verifier = openssl::sign::Verifier::new(openssl::hash::MessageDigest::sha512(), &public_key).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
-                    verifier.set_rsa_padding(openssl::rsa::Padding::PKCS1_PSS).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
-                    verifier.update(signature_base).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
-                    let result = verifier.verify(signature).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
-                    if !result {
-                        return Err(HttpSignaturesError::SignatureVerificationFailed);
-                    }
-                } else {
-                    return Err(HttpSignaturesError::MissingKeyParam);
-                }
-            }
-            SIGNATURE_ALGORITHM_RSA_PKCS1_SHA256 => {
-                if let Some(pkey) = &key_params.pkey {
-                    let public_key = openssl::pkey::PKey::public_key_from_pem(pkey).map_err(|_| HttpSignaturesError::MissingKeyParam)?;
-                    let mut verifier = openssl::sign::Verifier::new(openssl::hash::MessageDigest::sha256(), &public_key).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
-                    verifier.set_rsa_padding(openssl::rsa::Padding::PKCS1).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
-                    verifier.update(signature_base).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
-                    let result = verifier.verify(signature).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
-                    if !result {
-                        return Err(HttpSignaturesError::SignatureVerificationFailed);
-                    }
-                } else {
-                    return Err(HttpSignaturesError::MissingKeyParam);
-                }
-            }
-            SIGNATURE_ALGORITHM_ECDSA_P256_SHA256 => {
-                if let Some(pkey) = &key_params.pkey {
-                    let public_key = openssl::pkey::PKey::public_key_from_pem(pkey).map_err(|_| HttpSignaturesError::MissingKeyParam)?;
-                    let mut verifier = openssl::sign::Verifier::new(MessageDigest::sha256(), &public_key).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
-                    let result = verifier.verify_oneshot(signature, signature_base).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
-                    if !result {
-                        return Err(HttpSignaturesError::SignatureVerificationFailed);
-                    }
-                } else {
-                    return Err(HttpSignaturesError::MissingKeyParam);
-                }
-            }
-            SIGNATURE_ALGORITHM_ECDSA_P384_SHA384 => {
-                if let Some(pkey) = &key_params.pkey {
-                    let public_key = openssl::pkey::PKey::public_key_from_pem(pkey).map_err(|_| HttpSignaturesError::MissingKeyParam)?;
-                    let mut verifier = openssl::sign::Verifier::new(MessageDigest::sha384(), &public_key).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
-                    let result = verifier.verify_oneshot(signature, signature_base).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
-                    if !result {
-                        return Err(HttpSignaturesError::SignatureVerificationFailed);
-                    }
-                } else {
-                    return Err(HttpSignaturesError::MissingKeyParam);
-                }
-            }
-            SIGNATURE_ALGORITHM_ED25519 => {
-                if let Some(pkey) = &key_params.pkey {
-                    let public_key = openssl::pkey::PKey::public_key_from_pem(pkey).map_err(|_| HttpSignaturesError::MissingKeyParam)?;
-                    let mut verifier = openssl::sign::Verifier::new_without_digest(&public_key).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
-                    let result = verifier.verify_oneshot(signature, signature_base).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
-                    if !result {
-                        return Err(HttpSignaturesError::SignatureVerificationFailed);
-                    }
-                } else {
-                    return Err(HttpSignaturesError::MissingKeyParam);
-                }
-            }
-            SIGNATURE_ALGORITHM_HMAC_SHA256 => {
-                if let Some(shared_secret) = &key_params.shared_secret {
-                    let mut hmac = Hmac::<Sha256>::new_from_slice(shared_secret.as_bytes()).map_err(|_| HttpSignaturesError::MissingKeyParam)?;
-                    hmac.update(signature_base);
-                    hmac.verify_slice(signature).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
-                } else {
-                    return Err(HttpSignaturesError::MissingKeyParam);
-                }
-            }
-            _ => return Err(HttpSignaturesError::UnsupportedAlgorithm { algorithm: algorithm.to_string() }),
-        };
+    fn verify(algorithm: &str, security_key: &SecurityKeyEnum, signature_base: &[u8], signature: &[u8]) -> Result<(), HttpSignaturesError> {
+        if algorithm != security_key.get_algorithm_string() {
+            return Err(HttpSignaturesError::InvalidSignatureFormat);
+        }
+        security_key.verify(signature, signature_base)?;
         Ok(())
+    }
+}
+
+/**
+ * Represents the algorithm used for signing.
+ */
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Algorithm {
+    /**
+     * RSA PSS with SHA-512.
+     */
+    RsaPssSha512,
+    /**
+     * RSA PKCS1 with SHA-256.
+     */
+    RsaPkcs1Sha256,
+    /**
+     * ECDSA P256 with SHA-256.
+     */
+    EcdsaP256Sha256,
+    /**
+     * ECDSA P384 with SHA-384.
+     */
+    EcdsaP384Sha384,
+    /**
+     * Ed25519.
+     */
+    Ed25519,
+    /**
+     * HMAC with SHA-256.
+     */
+    HmacSha256,
+}
+
+impl Display for Algorithm {
+    
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Algorithm::RsaPssSha512 => write!(f, "{SIGNATURE_ALGORITHM_RSA_PSS_SHA512}"),
+            Algorithm::RsaPkcs1Sha256 => write!(f, "{SIGNATURE_ALGORITHM_RSA_PKCS1_SHA256}"),
+            Algorithm::EcdsaP256Sha256 => write!(f, "{SIGNATURE_ALGORITHM_ECDSA_P256_SHA256}"),
+            Algorithm::EcdsaP384Sha384 => write!(f, "{SIGNATURE_ALGORITHM_ECDSA_P384_SHA384}"),
+            Algorithm::Ed25519 => write!(f, "{SIGNATURE_ALGORITHM_ED25519}"),
+            Algorithm::HmacSha256 => write!(f, "{SIGNATURE_ALGORITHM_HMAC_SHA256}"),
+        }
+    }
+}
+
+impl FromStr for Algorithm {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, ()> {
+        match s {
+            SIGNATURE_ALGORITHM_RSA_PSS_SHA512 => Ok(Algorithm::RsaPssSha512),
+            SIGNATURE_ALGORITHM_RSA_PKCS1_SHA256 => Ok(Algorithm::RsaPkcs1Sha256),
+            SIGNATURE_ALGORITHM_ECDSA_P256_SHA256 => Ok(Algorithm::EcdsaP256Sha256),
+            SIGNATURE_ALGORITHM_ECDSA_P384_SHA384 => Ok(Algorithm::EcdsaP384Sha384),
+            SIGNATURE_ALGORITHM_ED25519 => Ok(Algorithm::Ed25519),
+            SIGNATURE_ALGORITHM_HMAC_SHA256 => Ok(Algorithm::HmacSha256),
+            _ => Err(()),
+        }
     }
 }
 
@@ -248,31 +237,256 @@ impl DeriveInputElements {
  * Key parameters for HTTP signatures.
  */
 #[derive(Clone, Debug)]
-pub struct KeyParams {
+pub enum SecurityKeyEnum {
     /**
      * The public key used for signature verification.
      */
-    pub pkey: Option<Vec<u8>>,
+    PublicKey{ contents: Vec<u8>, algorithm: Algorithm },
     /**
      * The shared secret used for hmac signature verification.
      */
-    pub shared_secret: Option<String>,
+    SharedSecret{ contents: String, algorithm: Algorithm },
 }
 
-impl KeyParams {
+impl SecurityKeyEnum {
+
     /**
-     * Creates a new instance of `KeyParams`.
-     *
-     * # Arguments
-     * `pkey`: The public key used for signature verification.
-     * `shared_secret`: The shared secret used for hmac signature verification.
-     *
-     * # Returns
-     * A new instance of `KeyParams`.
+     * Returns the algorithm as a string.
      */
-    pub fn new(pkey: Option<Vec<u8>>, shared_secret: Option<String>) -> Self {
-        KeyParams { pkey, shared_secret }
+    fn get_algorithm_string(&self) -> String {
+        match self {
+            SecurityKeyEnum::PublicKey { algorithm, .. } => algorithm.to_string(),
+            SecurityKeyEnum::SharedSecret { algorithm, .. } => algorithm.to_string(),
+        }
     }
+
+    /**
+     * Verifies the signature using the appropriate key.
+     *
+     * This function delegates the verification to the specific
+     * key type (public, shared secret, or private).
+     *
+     * #Arguments
+     *
+     * `signature`: The signature to verify.
+     * `signature_base`: The base data used to create the signature.
+     *
+     * #Returns
+     *
+     * This function returns `Ok(())` if the signature is valid, or an error
+     * if the signature is invalid.
+     */
+    pub fn verify(&self, signature: &[u8], signature_base: &[u8]) -> Result<(), HttpSignaturesError> {
+        match self {
+            SecurityKeyEnum::PublicKey { algorithm, contents } => {
+                Self::verify_public_key(algorithm, contents, signature, signature_base)?;
+            },
+            SecurityKeyEnum::SharedSecret { algorithm: _, contents } => {
+                Self::verify_shared_secret(signature, signature_base, contents.as_bytes())?
+            },
+        }
+        Ok(())
+    }
+
+    /**
+     * Verifies a public key signature.
+     *
+     * This function uses the public key to verify the signature
+     * against the provided signature base.
+     *
+     * #Arguments
+     *
+     * `algorithm`: The algorithm used for verification.
+     * `public_key`: The public key used to verify the signature.
+     * `signature`: The signature to verify.
+     * `signature_base`: The base data used to create the signature.
+     *
+     * #Returns
+     *
+     * This function returns `Ok(())` if the signature is valid, or an error
+     * if the signature is invalid. 
+     */
+    fn verify_public_key(algorithm: &Algorithm, public_key: &[u8], signature: &[u8], signature_base: &[u8]) -> Result<(), HttpSignaturesError> {
+        let public_key = openssl::pkey::PKey::public_key_from_pem(public_key).map_err(|_| HttpSignaturesError::MissingKeyParam)?;
+        match algorithm {
+            Algorithm::RsaPssSha512 => {
+                Self::verify_rsa_pss_sha512(public_key, signature, signature_base)?
+            },
+            Algorithm::RsaPkcs1Sha256 => {
+                Self::verify_rsa_pkcs1_sha256(public_key, signature, signature_base)?
+            },
+            Algorithm::EcdsaP256Sha256 => {
+                Self::verify_ecdsa_p256_sha256(public_key, signature, signature_base)?
+            },
+            Algorithm::EcdsaP384Sha384 => {
+                Self::verify_ecdsa_p384_sha384(public_key, signature, signature_base)?
+            },
+            Algorithm::Ed25519 => {
+                Self::verify_ed25519(public_key, signature, signature_base)?
+            },
+            _ => return Err(HttpSignaturesError::SignatureVerificationFailed),
+        };
+        Ok(())
+    }
+
+    /**
+     * Verifies a shared secret signature.
+     *
+     * This function uses the shared secret to verify the signature
+     * against the provided signature base.
+     *
+     * #Arguments
+     *
+     * `signature`: The signature to verify.
+     * `signature_base`: The base data used to create the signature.
+     * `shared_secret`: The shared secret used to verify the signature.
+     *
+     * #Returns
+     *
+     * This function returns `Ok(())` if the signature is valid, or an error
+     * if the signature is invalid.
+     */
+    fn verify_shared_secret(signature: &[u8], signature_base: &[u8], shared_secret: &[u8]) -> Result<(), HttpSignaturesError> {
+        let mut hmac = Hmac::<Sha256>::new_from_slice(shared_secret).map_err(|_| HttpSignaturesError::MissingKeyParam)?;
+        hmac.update(signature_base);
+        hmac.verify_slice(signature).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+        Ok(())
+    }
+
+    /**
+     * Verifies an RSA PSS SHA-512 signature.
+     *
+     * This function uses the RSA public key to verify the signature
+     * against the provided signature base.
+     *
+     * #Arguments
+     *
+     * `public_key`: The RSA public key used to verify the signature.
+     * `signature`: The signature to verify.
+     * `signature_base`: The base data used to create the signature.
+     *
+     * #Returns
+     *
+     * This function returns `Ok(())` if the signature is valid, or an error
+     * if the signature is invalid.
+     */
+    fn verify_rsa_pss_sha512(public_key: PKey<Public>, signature: &[u8], signature_base: &[u8]) -> Result<(), HttpSignaturesError> {
+        let mut verifier = openssl::sign::Verifier::new(openssl::hash::MessageDigest::sha512(), &public_key).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+        verifier.set_rsa_padding(openssl::rsa::Padding::PKCS1_PSS).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+        verifier.update(signature_base).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+        let result = verifier.verify(signature).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+        if !result {
+            return Err(HttpSignaturesError::SignatureVerificationFailed);
+        }
+        Ok(())
+    }
+
+    /**
+     * Verifies an RSA PKCS#1 SHA-256 signature.
+     *
+     * This function uses the RSA public key to verify the signature
+     * against the provided signature base.
+     *
+     * #Arguments
+     *
+     * `public_key`: The RSA public key used to verify the signature.
+     * `signature`: The signature to verify.
+     * `signature_base`: The base data used to create the signature.
+     *
+     * #Returns
+     *
+     * This function returns `Ok(())` if the signature is valid, or an error
+     * if the signature is invalid.
+     */
+    fn verify_rsa_pkcs1_sha256(public_key: PKey<Public>, signature: &[u8], signature_base: &[u8]) -> Result<(), HttpSignaturesError> {
+        let mut verifier = openssl::sign::Verifier::new(openssl::hash::MessageDigest::sha256(), &public_key).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+        verifier.set_rsa_padding(openssl::rsa::Padding::PKCS1).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+        verifier.update(signature_base).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+        let result = verifier.verify(signature).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+        if !result {
+            return Err(HttpSignaturesError::SignatureVerificationFailed);
+        }
+        Ok(())
+    }
+
+    /**
+     * Verifies an ECDSA P-256 SHA-256 signature.
+     *
+     * This function uses the ECDSA P-256 public key to verify the signature
+     * against the provided signature base.
+     *
+     * #Arguments
+     *
+     * `public_key`: The ECDSA P-256 public key used to verify the signature.
+     * `signature`: The signature to verify.
+     * `signature_base`: The base data used to create the signature.
+     *
+     * #Returns
+     *
+     * This function returns `Ok(())` if the signature is valid, or an error
+     * if the signature is invalid.
+     */
+    fn verify_ecdsa_p256_sha256(public_key: PKey<Public>, signature: &[u8], signature_base: &[u8]) -> Result<(), HttpSignaturesError> {
+        let mut verifier = openssl::sign::Verifier::new(MessageDigest::sha256(), &public_key).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+        let result = verifier.verify_oneshot(signature, signature_base).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+        if !result {
+            return Err(HttpSignaturesError::SignatureVerificationFailed);
+        }
+        Ok(())
+    }
+
+    /**
+     * Verifies an ECDSA P-384 SHA-384 signature.
+     *
+     * This function uses the ECDSA P-384 public key to verify the signature
+     * against the provided signature base.
+     *
+     * #Arguments
+     *
+     * `public_key`: The ECDSA P-384 public key used to verify the signature.
+     * `signature`: The signature to verify.
+     * `signature_base`: The base data used to create the signature.
+     *
+     * #Returns
+     *
+     * This function returns `Ok(())` if the signature is valid, or an error
+     * if the signature is invalid.
+     */
+    fn verify_ecdsa_p384_sha384(public_key: PKey<Public>, signature: &[u8], signature_base: &[u8]) -> Result<(), HttpSignaturesError> {
+        let mut verifier = openssl::sign::Verifier::new(MessageDigest::sha384(), &public_key).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+        let result = verifier.verify_oneshot(signature, signature_base).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+        if !result {
+            return Err(HttpSignaturesError::SignatureVerificationFailed);
+        }
+        Ok(())
+    }
+
+    /**
+     * Verifies an Ed25519 signature.
+     *
+     * This function uses the Ed25519 public key to verify the signature
+     * against the provided signature base.
+     * 
+     * #Arguments
+     *
+     * `public_key`: The Ed25519 public key used to verify the signature.
+     * `signature`: The signature to verify.
+     * `signature_base`: The base data used to create the signature.
+     *
+     * #Returns
+     *
+     * This function returns `Ok(())` if the signature is valid, or an error
+     * if the signature is invalid.
+     */
+    fn verify_ed25519(public_key: PKey<Public>, signature: &[u8], signature_base: &[u8]) -> Result<(), HttpSignaturesError> {
+        let mut verifier = openssl::sign::Verifier::new_without_digest(&public_key).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+        let result = verifier.verify_oneshot(signature, signature_base).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+        if !result {
+            return Err(HttpSignaturesError::SignatureVerificationFailed);
+        }
+        Ok(())
+    }
+
 }
 
 /**
@@ -340,10 +554,6 @@ pub enum HttpSignaturesError {
      * Error indicating that the signature has expired. The expired timestamp is provided.
      */
     SignatureExpired { expired: usize },
-    /**
-     * Error indicating that the algorithm is unsupported. The unsupported algorithm is provided.
-     */
-    UnsupportedAlgorithm { algorithm: String },
     /**
      * Missing key parameter. For rsa, edcsa and ed22519 this is the public key.
      * For hmac this is the shared secret.
@@ -1374,8 +1584,8 @@ mod test {
 
         let public_key = fs::read("test_config/keys/public_key1.pem").unwrap();
 
-        let mut keys: HashMap<String, KeyParams> = HashMap::new();
-        keys.insert("key123".to_string(), KeyParams::new(Some(public_key), None));
+        let mut keys: HashMap<String, SecurityKeyEnum> = HashMap::new();
+        keys.insert("key123".to_string(), SecurityKeyEnum::PublicKey { contents: public_key, algorithm: Algorithm::RsaPssSha512 });
         let service = HttpSignaturesService::new(Some(requirements), keys);
         let result = service.verify_signature(&headers, &derive_elements);
         assert!(result.is_ok());
@@ -1413,8 +1623,8 @@ mod test {
 
         let public_key = fs::read("test_config/keys/public_key2.pem").unwrap();
 
-        let mut keys: HashMap<String, KeyParams> = HashMap::new();
-        keys.insert("key123".to_string(), KeyParams::new(Some(public_key), None));
+        let mut keys: HashMap<String, SecurityKeyEnum> = HashMap::new();
+        keys.insert("key123".to_string(), SecurityKeyEnum::PublicKey { contents: public_key, algorithm: Algorithm::RsaPkcs1Sha256 });
         let service = HttpSignaturesService::new(Some(requirements), keys);
         let result = service.verify_signature(&headers, &derive_elements);
         assert!(result.is_ok());
@@ -1450,8 +1660,8 @@ mod test {
 
         let public_key = fs::read("test_config/keys/public_key5.pem").unwrap();
 
-        let mut keys: HashMap<String, KeyParams> = HashMap::new();
-        keys.insert("key123".to_string(), KeyParams::new(Some(public_key), None));
+        let mut keys: HashMap<String, SecurityKeyEnum> = HashMap::new();
+        keys.insert("key123".to_string(), SecurityKeyEnum::PublicKey { contents: public_key, algorithm: Algorithm::EcdsaP256Sha256 });
         let service = HttpSignaturesService::new(Some(requirements), keys);
         let result = service.verify_signature(&headers, &derive_elements);
         assert!(result.is_ok());
@@ -1487,8 +1697,8 @@ mod test {
 
         let public_key = fs::read("test_config/keys/public_key6.pem").unwrap();
 
-        let mut keys: HashMap<String, KeyParams> = HashMap::new();
-        keys.insert("key123".to_string(), KeyParams::new(Some(public_key), None));
+        let mut keys: HashMap<String, SecurityKeyEnum> = HashMap::new();
+        keys.insert("key123".to_string(), SecurityKeyEnum::PublicKey { contents: public_key, algorithm: Algorithm::EcdsaP384Sha384 });
         let service = HttpSignaturesService::new(Some(requirements), keys);
         let result = service.verify_signature(&headers, &derive_elements);
         assert!(result.is_ok());
@@ -1522,8 +1732,8 @@ mod test {
         headers.insert("content-digest".to_string(), "sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:".to_string());
         headers.insert("date".to_string(), "Tue, 20 Apr 2021 02:07:55 GMT".to_string());
 
-        let mut keys: HashMap<String, KeyParams> = HashMap::new();
-        keys.insert("key123".to_string(), KeyParams::new(Some(fs::read("test_config/keys/public_key4.pem").unwrap()), None));
+        let mut keys: HashMap<String, SecurityKeyEnum> = HashMap::new();
+        keys.insert("key123".to_string(), SecurityKeyEnum::PublicKey { contents: fs::read("test_config/keys/public_key4.pem").unwrap(), algorithm: Algorithm::Ed25519 });
         let service = HttpSignaturesService::new(Some(requirements), keys);
         let result = service.verify_signature(&headers, &derive_elements);
         assert!(result.is_ok());
@@ -1554,8 +1764,8 @@ mod test {
         headers.insert("content-digest".to_string(), "sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:".to_string());
         headers.insert("date".to_string(), "Tue, 20 Apr 2021 02:07:55 GMT".to_string());
 
-        let mut keys: HashMap<String, KeyParams> = HashMap::new();
-        keys.insert("key123".to_string(), KeyParams::new(None, Some("TestHMACKey".to_string())));
+        let mut keys: HashMap<String, SecurityKeyEnum> = HashMap::new();
+        keys.insert("key123".to_string(), SecurityKeyEnum::SharedSecret { contents: "TestHMACKey".to_string(), algorithm: Algorithm::HmacSha256 });
         let service = HttpSignaturesService::new(Some(requirements), keys);
         let result = service.verify_signature(&headers, &derive_elements);
         assert!(result.is_ok());
@@ -1581,8 +1791,8 @@ mod test {
         headers.insert("content-digest".to_string(), "sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:".to_string());
         headers.insert("date".to_string(), "Tue, 20 Apr 2021 02:07:55 GMT".to_string());
 
-        let mut keys: HashMap<String, KeyParams> = HashMap::new();
-        keys.insert("key123".to_string(), KeyParams::new(None, Some("TestHMACKey".to_string())));
+        let mut keys: HashMap<String, SecurityKeyEnum> = HashMap::new();
+        keys.insert("key123".to_string(), SecurityKeyEnum::SharedSecret { contents: "TestHMACKey".to_string(), algorithm: Algorithm::HmacSha256 });
         let service = HttpSignaturesService::new(Some(requirements), keys);
         let result = service.verify_signature(&headers, &derive_elements);
         assert!(result.is_ok());
