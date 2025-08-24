@@ -290,7 +290,7 @@ impl SecurityKeyEnum {
                 Self::verify_signature_shared_secret(signature, signature_base, contents.as_bytes())?
             },
             SecurityKeyEnum::PrivateKey { .. } => {
-                return Err(HttpSignaturesError::SignatureVerificationFailed);
+                return Err(HttpSignaturesError::UnsupportedAlgorithm { details: "Private key verification not supported".into() });
             },
         }
         Ok(())
@@ -321,7 +321,7 @@ impl SecurityKeyEnum {
                 Self::generate_signature_shared_secret(contents.as_bytes(), signature_base)
             },
             SecurityKeyEnum::PublicKey { .. } => {
-                return Err(HttpSignaturesError::SignatureGenerationFailed);
+                return Err(HttpSignaturesError::UnsupportedAlgorithm { details: "Public key generation not supported".into() });
             },
         }
     }
@@ -347,7 +347,7 @@ impl SecurityKeyEnum {
     fn verify_signature_public_key(algorithm: &Algorithm, public_key: &[u8], signature: &[u8], signature_base: &[u8]) -> Result<(), HttpSignaturesError> {
         let public_key = openssl::pkey::PKey::public_key_from_pem(public_key).map_err(|err| {
             warn!("Failed to read public key: {err}");
-            HttpSignaturesError::MissingKeyParam
+            HttpSignaturesError::FailedToReadKey
         })?;
         match algorithm {
             Algorithm::RsaPssSha512 => {
@@ -365,7 +365,7 @@ impl SecurityKeyEnum {
             Algorithm::Ed25519 => {
                 Self::verify_ed25519(public_key, signature, signature_base)?
             },
-            _ => return Err(HttpSignaturesError::SignatureVerificationFailed),
+            _ => return Err(HttpSignaturesError::UnsupportedAlgorithm { details: format!("Unsupported algorithm: {:?}", algorithm) }),
         };
         Ok(())
     }
@@ -389,7 +389,7 @@ impl SecurityKeyEnum {
     fn generate_signature_private_key(algorithm: &Algorithm, private_key: &[u8], signature: &[u8]) -> Result<Vec<u8>, HttpSignaturesError> {
         let private_key = openssl::pkey::PKey::private_key_from_pem(private_key).map_err(|err| {
             warn!("Failed to read private key: {err}");
-            HttpSignaturesError::SignatureGenerationFailed
+            HttpSignaturesError::FailedToReadKey
         })?;
         let generated_signature = match algorithm {
             Algorithm::RsaPssSha512 => {
@@ -407,7 +407,7 @@ impl SecurityKeyEnum {
             Algorithm::Ed25519 => {
                 Self::generate_ed25519_signature(private_key, signature)?
             },
-            _ => return Err(HttpSignaturesError::SignatureGenerationFailed),
+            _ => return Err(HttpSignaturesError::UnsupportedAlgorithm { details: format!("Unsupported algorithm: {:?}", algorithm) }),
         };
         Ok(generated_signature)
     }
@@ -432,12 +432,12 @@ impl SecurityKeyEnum {
     fn verify_signature_shared_secret(signature: &[u8], signature_base: &[u8], shared_secret: &[u8]) -> Result<(), HttpSignaturesError> {
         let mut hmac = Hmac::<Sha256>::new_from_slice(shared_secret).map_err(|err| {
             warn!("Failed to create HMAC: {err}");
-            HttpSignaturesError::MissingKeyParam
+            HttpSignaturesError::HmacError
         })?;
         hmac.update(signature_base);
         hmac.verify_slice(signature).map_err(|err| {
             warn!("Failed to verify HMAC: {err}");
-            HttpSignaturesError::SignatureVerificationFailed
+            HttpSignaturesError::SignatureVerificationFailed { details: err.to_string() }
         })?;
         Ok(())
     }
@@ -461,7 +461,7 @@ impl SecurityKeyEnum {
     fn generate_signature_shared_secret(shared_secret: &[u8], signature_base: &[u8]) -> Result<Vec<u8>, HttpSignaturesError> {
         let mut hmac = Hmac::<Sha256>::new_from_slice(shared_secret).map_err(|err| {
             warn!("Failed to create HMAC: {err}");
-            HttpSignaturesError::SignatureGenerationFailed
+            HttpSignaturesError::HmacError
         })?;
         hmac.update(signature_base);
         let signature = hmac.finalize().into_bytes();
@@ -486,21 +486,24 @@ impl SecurityKeyEnum {
      * if the signature is invalid.
      */
     fn verify_rsa_pss_sha512(public_key: PKey<Public>, signature: &[u8], signature_base: &[u8]) -> Result<(), HttpSignaturesError> {
-        let mut verifier = openssl::sign::Verifier::new(openssl::hash::MessageDigest::sha512(), &public_key).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+        let mut verifier = openssl::sign::Verifier::new(openssl::hash::MessageDigest::sha512(), &public_key).map_err(|err| {
+            warn!("Failed to create verifier: {err}");
+            HttpSignaturesError::SignatureVerificationFailed { details: err.to_string() }
+        })?;
         verifier.set_rsa_padding(openssl::rsa::Padding::PKCS1_PSS).map_err(|err| {
             warn!("Failed to set RSA padding: {err}");
-            HttpSignaturesError::SignatureVerificationFailed
+            HttpSignaturesError::SignatureVerificationFailed { details: err.to_string() }
         })?;
         verifier.update(signature_base).map_err(|err| {
             warn!("Failed to update verifier: {err}");
-            HttpSignaturesError::SignatureVerificationFailed
+            HttpSignaturesError::SignatureVerificationFailed { details: err.to_string() }
         })?;
         let result = verifier.verify(signature).map_err(|err| {
             warn!("Failed to verify signature: {err}");
-            HttpSignaturesError::SignatureVerificationFailed
+            HttpSignaturesError::SignatureVerificationFailed { details: err.to_string() }
         })?;
         if !result {
-            return Err(HttpSignaturesError::SignatureVerificationFailed);
+            return Err(HttpSignaturesError::SignatureVerificationFailed { details: "Invalid signature".into() });
         }
         Ok(())
     }
@@ -524,19 +527,19 @@ impl SecurityKeyEnum {
     fn generate_rsa_pss_sha512_signature(private_key: PKey<Private>, signature_data: &[u8]) -> Result<Vec<u8>, HttpSignaturesError> {
         let mut signer = openssl::sign::Signer::new(openssl::hash::MessageDigest::sha512(), &private_key).map_err(|err| {
             warn!("Failed to create signer: {err}");
-            HttpSignaturesError::SignatureGenerationFailed
+            HttpSignaturesError::SignatureGenerationFailed { details: err.to_string() }
         })?;
         signer.set_rsa_padding(openssl::rsa::Padding::PKCS1_PSS).map_err(|err| {
             warn!("Failed to set RSA padding: {err}");
-            HttpSignaturesError::SignatureGenerationFailed
+            HttpSignaturesError::SignatureGenerationFailed { details: err.to_string() }
         })?;
         signer.update(signature_data).map_err(|err| {
             warn!("Failed to update signer: {err}");
-            HttpSignaturesError::SignatureGenerationFailed
+            HttpSignaturesError::SignatureGenerationFailed { details: err.to_string() }
         })?;
         let signature = signer.sign_to_vec().map_err(|err| {
             warn!("Failed to sign data: {err}");
-            HttpSignaturesError::SignatureGenerationFailed
+            HttpSignaturesError::SignatureGenerationFailed { details: err.to_string() }
         })?;
         Ok(signature)
     }
@@ -561,22 +564,22 @@ impl SecurityKeyEnum {
     fn verify_rsa_pkcs1_sha256(public_key: PKey<Public>, signature: &[u8], signature_base: &[u8]) -> Result<(), HttpSignaturesError> {
         let mut verifier = openssl::sign::Verifier::new(openssl::hash::MessageDigest::sha256(), &public_key).map_err(|err| {
             warn!("Failed to create verifier: {err}");
-            HttpSignaturesError::SignatureVerificationFailed
+            HttpSignaturesError::SignatureVerificationFailed { details: err.to_string() }
         })?;
         verifier.set_rsa_padding(openssl::rsa::Padding::PKCS1).map_err(|err| {
             warn!("Failed to set RSA padding: {err}");
-            HttpSignaturesError::SignatureVerificationFailed
+            HttpSignaturesError::SignatureVerificationFailed { details: err.to_string() }
         })?;
         verifier.update(signature_base).map_err(|err| {
             warn!("Failed to update verifier: {err}");
-            HttpSignaturesError::SignatureVerificationFailed
+            HttpSignaturesError::SignatureVerificationFailed { details: err.to_string() }
         })?;
         let result = verifier.verify(signature).map_err(|err| {
             warn!("Failed to verify RSA PKCS#1 SHA-256 signature: {err}");
-            HttpSignaturesError::SignatureVerificationFailed
+            HttpSignaturesError::SignatureVerificationFailed { details: err.to_string() }
         })?;
         if !result {
-            return Err(HttpSignaturesError::SignatureVerificationFailed);
+            return Err(HttpSignaturesError::SignatureVerificationFailed { details: "Invalid signature".into() });
         }
         Ok(())
     }
@@ -600,19 +603,19 @@ impl SecurityKeyEnum {
     fn generate_rsa_pkcs1_sha256_signature(private_key: PKey<Private>, signature_data: &[u8]) -> Result<Vec<u8>, HttpSignaturesError> {
         let mut signer = openssl::sign::Signer::new(openssl::hash::MessageDigest::sha256(), &private_key).map_err(|err| {
             warn!("Failed to create signer: {err}");
-            HttpSignaturesError::SignatureGenerationFailed
+            HttpSignaturesError::SignatureGenerationFailed { details: err.to_string() }
         })?;
         signer.set_rsa_padding(openssl::rsa::Padding::PKCS1).map_err(|err| {
             warn!("Failed to set RSA padding: {err}");
-            HttpSignaturesError::SignatureGenerationFailed
+            HttpSignaturesError::SignatureGenerationFailed { details: err.to_string() }
         })?;
         signer.update(signature_data).map_err(|err| {
             warn!("Failed to update signer: {err}");
-            HttpSignaturesError::SignatureGenerationFailed
+            HttpSignaturesError::SignatureGenerationFailed { details: err.to_string() }
         })?;
         let signature = signer.sign_to_vec().map_err(|err| {
             warn!("Failed to sign data: {err}");
-            HttpSignaturesError::SignatureGenerationFailed
+            HttpSignaturesError::SignatureGenerationFailed { details: err.to_string() }
         })?;
         Ok(signature)
     }
@@ -637,14 +640,14 @@ impl SecurityKeyEnum {
     fn verify_ecdsa_p256_sha256(public_key: PKey<Public>, signature: &[u8], signature_base: &[u8]) -> Result<(), HttpSignaturesError> {
         let mut verifier = openssl::sign::Verifier::new(MessageDigest::sha256(), &public_key).map_err(|err| {
             warn!("Failed to create verifier: {err}");
-            HttpSignaturesError::SignatureVerificationFailed
+            HttpSignaturesError::SignatureVerificationFailed { details: err.to_string() }
         })?;
         let result = verifier.verify_oneshot(signature, signature_base).map_err(|err| {
             warn!("Failed to verify ECDSA P-256 SHA-256 signature: {err}");
-            HttpSignaturesError::SignatureVerificationFailed
+            HttpSignaturesError::SignatureVerificationFailed { details: err.to_string() }
         })?;
         if !result {
-            return Err(HttpSignaturesError::SignatureVerificationFailed);
+            return Err(HttpSignaturesError::SignatureVerificationFailed { details: "Invalid signature".into() });
         }
         Ok(())
     }
@@ -668,15 +671,15 @@ impl SecurityKeyEnum {
     fn generate_ecdsa_p256_sha256_signature(private_key: PKey<Private>, signature_data: &[u8]) -> Result<Vec<u8>, HttpSignaturesError> {
         let mut signer = openssl::sign::Signer::new(MessageDigest::sha256(), &private_key).map_err(|err| {
             warn!("Failed to create signer: {err}");
-            HttpSignaturesError::SignatureGenerationFailed
+            HttpSignaturesError::SignatureGenerationFailed { details: err.to_string() }
         })?;
         signer.update(signature_data).map_err(|err| {
             warn!("Failed to update signer: {err}");
-            HttpSignaturesError::SignatureGenerationFailed
+            HttpSignaturesError::SignatureGenerationFailed { details: err.to_string() }
         })?;
         let signature = signer.sign_to_vec().map_err(|err| {
             warn!("Failed to sign data: {err}");
-            HttpSignaturesError::SignatureGenerationFailed
+            HttpSignaturesError::SignatureGenerationFailed { details: err.to_string() }
         })?;
         Ok(signature)
     }
@@ -701,14 +704,14 @@ impl SecurityKeyEnum {
     fn verify_ecdsa_p384_sha384(public_key: PKey<Public>, signature: &[u8], signature_base: &[u8]) -> Result<(), HttpSignaturesError> {
         let mut verifier = openssl::sign::Verifier::new(MessageDigest::sha384(), &public_key).map_err(|err| {
             warn!("Failed to create verifier: {err}");
-            HttpSignaturesError::SignatureVerificationFailed
+            HttpSignaturesError::SignatureVerificationFailed { details: err.to_string() }
         })?;
         let result = verifier.verify_oneshot(signature, signature_base).map_err(|err| {
             warn!("Failed to verify ECDSA P-384 SHA-384 signature: {err}");
-            HttpSignaturesError::SignatureVerificationFailed
+            HttpSignaturesError::SignatureVerificationFailed { details: err.to_string() }
         })?;
         if !result {
-            return Err(HttpSignaturesError::SignatureVerificationFailed);
+            return Err(HttpSignaturesError::SignatureVerificationFailed { details: "Invalid signature".into() });
         }
         Ok(())
     }
@@ -732,15 +735,15 @@ impl SecurityKeyEnum {
     fn generate_ecdsa_p384_sha384_signature(private_key: PKey<Private>, signature_data: &[u8]) -> Result<Vec<u8>, HttpSignaturesError> {
         let mut signer = openssl::sign::Signer::new(MessageDigest::sha384(), &private_key).map_err(|err| {
             warn!("Failed to create signer: {err}");
-            HttpSignaturesError::SignatureGenerationFailed
+            HttpSignaturesError::SignatureGenerationFailed { details: err.to_string() }
         })?;
         signer.update(signature_data).map_err(|err| {
             warn!("Failed to update signer: {err}");
-            HttpSignaturesError::SignatureGenerationFailed
+            HttpSignaturesError::SignatureGenerationFailed { details: err.to_string() }
         })?;
         let signature = signer.sign_to_vec().map_err(|err| {
             warn!("Failed to sign data: {err}");
-            HttpSignaturesError::SignatureGenerationFailed
+            HttpSignaturesError::SignatureGenerationFailed { details: err.to_string() }
         })?;
         Ok(signature)
     } 
@@ -765,14 +768,14 @@ impl SecurityKeyEnum {
     fn verify_ed25519(public_key: PKey<Public>, signature: &[u8], signature_base: &[u8]) -> Result<(), HttpSignaturesError> {
         let mut verifier = openssl::sign::Verifier::new_without_digest(&public_key).map_err(|err| {
             warn!("Failed to create verifier: {err}");
-            HttpSignaturesError::SignatureVerificationFailed
+            HttpSignaturesError::SignatureVerificationFailed { details: err.to_string() }
         })?;
         let result = verifier.verify_oneshot(signature, signature_base).map_err(|err| {
             warn!("Failed to verify Ed25519 signature: {err}");
-            HttpSignaturesError::SignatureVerificationFailed
+            HttpSignaturesError::SignatureVerificationFailed { details: err.to_string() }
         })?;
         if !result {
-            return Err(HttpSignaturesError::SignatureVerificationFailed);
+            return Err(HttpSignaturesError::SignatureVerificationFailed { details: "Invalid signature".into() });
         }
         Ok(())
     }
@@ -796,11 +799,11 @@ impl SecurityKeyEnum {
     fn generate_ed25519_signature(private_key: PKey<Private>, signature_data: &[u8]) -> Result<Vec<u8>, HttpSignaturesError> {
         let mut signer = openssl::sign::Signer::new_without_digest(&private_key).map_err(|err| {
             warn!("Failed to create signer: {err}");
-            HttpSignaturesError::SignatureGenerationFailed
+            HttpSignaturesError::SignatureGenerationFailed { details: err.to_string() }
         })?;
         let signature = signer.sign_oneshot_to_vec(signature_data).map_err(|err| {
             warn!("Failed to sign data: {err}");
-            HttpSignaturesError::SignatureGenerationFailed
+            HttpSignaturesError::SignatureGenerationFailed { details: err.to_string() }
         })?;
         Ok(signature)
     }
@@ -867,20 +870,27 @@ pub enum HttpSignaturesError {
      * Error indicating that the signature verification failed. This means that the signature could not be verified against the public key.
      * This can happen if the signature is invalid or if the public key is incorrect.
      */
-    SignatureVerificationFailed,
+    SignatureVerificationFailed{ details: String },
     /**
      * Error indicating that the signature has expired. The expired timestamp is provided.
      */
     SignatureExpired { expired: usize },
     /**
-     * Missing key parameter. For rsa, edcsa and ed22519 this is the public key.
-     * For hmac this is the shared secret.
+     * Error indicating that the key could not be read from byte data.
      */
-    MissingKeyParam,
+    FailedToReadKey,
+    /**
+     * Error indicating that the HMAC data could not be generated.
+     */
+    HmacError,
+    /**
+     * Error indicating that the algorithm is not supported.
+     */
+    UnsupportedAlgorithm { details: String },
     /**
      * Error indicating that the signature generation failed.
      */
-    SignatureGenerationFailed,
+    SignatureGenerationFailed { details: String },
 }
 
 /**
