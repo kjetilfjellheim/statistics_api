@@ -2,10 +2,10 @@ use std::{collections::{HashMap, HashSet}, fmt::Display, str::FromStr};
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use hmac::{Hmac, Mac};
-use openssl::{hash::MessageDigest, pkey::{PKey, Public}};
+use openssl::{hash::MessageDigest, pkey::{PKey, Private, Public}};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
-use tracing::debug;
+use tracing::{debug, warn};
 
 /**
  * Signature algorithms.
@@ -105,7 +105,7 @@ impl HttpSignaturesService {
         if algorithm != security_key.get_algorithm_string() {
             return Err(HttpSignaturesError::InvalidSignatureFormat);
         }
-        security_key.verify(signature, signature_base)?;
+        security_key.verify_signature(signature, signature_base)?;
         Ok(())
     }
 }
@@ -246,6 +246,10 @@ pub enum SecurityKeyEnum {
      * The shared secret used for hmac signature verification.
      */
     SharedSecret{ contents: String, algorithm: Algorithm },
+    /**
+     * The private key used for signature generation.
+     */
+    PrivateKey{ contents: Vec<u8>, algorithm: Algorithm },
 }
 
 impl SecurityKeyEnum {
@@ -257,6 +261,7 @@ impl SecurityKeyEnum {
         match self {
             SecurityKeyEnum::PublicKey { algorithm, .. } => algorithm.to_string(),
             SecurityKeyEnum::SharedSecret { algorithm, .. } => algorithm.to_string(),
+            SecurityKeyEnum::PrivateKey { algorithm, .. } => algorithm.to_string(),
         }
     }
 
@@ -276,16 +281,49 @@ impl SecurityKeyEnum {
      * This function returns `Ok(())` if the signature is valid, or an error
      * if the signature is invalid.
      */
-    pub fn verify(&self, signature: &[u8], signature_base: &[u8]) -> Result<(), HttpSignaturesError> {
+    pub fn verify_signature(&self, signature: &[u8], signature_base: &[u8]) -> Result<(), HttpSignaturesError> {
         match self {
             SecurityKeyEnum::PublicKey { algorithm, contents } => {
-                Self::verify_public_key(algorithm, contents, signature, signature_base)?;
+                Self::verify_signature_public_key(algorithm, contents, signature, signature_base)?;
             },
             SecurityKeyEnum::SharedSecret { algorithm: _, contents } => {
-                Self::verify_shared_secret(signature, signature_base, contents.as_bytes())?
+                Self::verify_signature_shared_secret(signature, signature_base, contents.as_bytes())?
+            },
+            SecurityKeyEnum::PrivateKey { .. } => {
+                return Err(HttpSignaturesError::SignatureVerificationFailed);
             },
         }
         Ok(())
+    }
+
+    /**
+     * Generates a private key signature.
+     *
+     * This function uses the private key to generate a signature
+     * for the provided signature data.
+     *
+     * #Arguments
+     *
+     * `private_key`: The private key used to generate the signature.
+     * `signature_data`: The data to sign.
+     *
+     * #Returns
+     *
+     * This function returns a `Result` containing the generated signature
+     * or an error if the signature generation fails.
+     */
+    fn generate_signature(&self, signature_base: &[u8]) -> Result<Vec<u8>, HttpSignaturesError> {
+        match self {
+            SecurityKeyEnum::PrivateKey { algorithm, contents } => {
+                Self::generate_signature_private_key(algorithm, contents, signature_base)
+            },
+            SecurityKeyEnum::SharedSecret { algorithm: _, contents } => {
+                Self::generate_signature_shared_secret(contents.as_bytes(), signature_base)
+            },
+            SecurityKeyEnum::PublicKey { .. } => {
+                return Err(HttpSignaturesError::SignatureGenerationFailed);
+            },
+        }
     }
 
     /**
@@ -306,8 +344,11 @@ impl SecurityKeyEnum {
      * This function returns `Ok(())` if the signature is valid, or an error
      * if the signature is invalid. 
      */
-    fn verify_public_key(algorithm: &Algorithm, public_key: &[u8], signature: &[u8], signature_base: &[u8]) -> Result<(), HttpSignaturesError> {
-        let public_key = openssl::pkey::PKey::public_key_from_pem(public_key).map_err(|_| HttpSignaturesError::MissingKeyParam)?;
+    fn verify_signature_public_key(algorithm: &Algorithm, public_key: &[u8], signature: &[u8], signature_base: &[u8]) -> Result<(), HttpSignaturesError> {
+        let public_key = openssl::pkey::PKey::public_key_from_pem(public_key).map_err(|err| {
+            warn!("Failed to read public key: {err}");
+            HttpSignaturesError::MissingKeyParam
+        })?;
         match algorithm {
             Algorithm::RsaPssSha512 => {
                 Self::verify_rsa_pss_sha512(public_key, signature, signature_base)?
@@ -330,6 +371,48 @@ impl SecurityKeyEnum {
     }
 
     /**
+     * Generates a private key signature.
+     *
+     * This function uses the private key to generate a signature
+     * for the provided signature data.
+     *
+     * #Arguments
+     *
+     * `private_key`: The private key used to generate the signature.
+     * `signature_data`: The data to sign.
+     *
+     * #Returns
+     *
+     * This function returns a `Result` containing the generated signature
+     * or an error if the signature generation fails.
+     */
+    fn generate_signature_private_key(algorithm: &Algorithm, private_key: &[u8], signature: &[u8]) -> Result<Vec<u8>, HttpSignaturesError> {
+        let private_key = openssl::pkey::PKey::private_key_from_pem(private_key).map_err(|err| {
+            warn!("Failed to read private key: {err}");
+            HttpSignaturesError::SignatureGenerationFailed
+        })?;
+        let generated_signature = match algorithm {
+            Algorithm::RsaPssSha512 => {
+                Self::generate_rsa_pss_sha512_signature(private_key, signature)?
+            },
+            Algorithm::RsaPkcs1Sha256 => {
+                Self::generate_rsa_pkcs1_sha256_signature(private_key, signature)?
+            },
+            Algorithm::EcdsaP256Sha256 => {
+                Self::generate_ecdsa_p256_sha256_signature(private_key, signature)?
+            },
+            Algorithm::EcdsaP384Sha384 => {
+                Self::generate_ecdsa_p384_sha384_signature(private_key, signature)?
+            },
+            Algorithm::Ed25519 => {
+                Self::generate_ed25519_signature(private_key, signature)?
+            },
+            _ => return Err(HttpSignaturesError::SignatureGenerationFailed),
+        };
+        Ok(generated_signature)
+    }
+
+    /**
      * Verifies a shared secret signature.
      *
      * This function uses the shared secret to verify the signature
@@ -346,11 +429,43 @@ impl SecurityKeyEnum {
      * This function returns `Ok(())` if the signature is valid, or an error
      * if the signature is invalid.
      */
-    fn verify_shared_secret(signature: &[u8], signature_base: &[u8], shared_secret: &[u8]) -> Result<(), HttpSignaturesError> {
-        let mut hmac = Hmac::<Sha256>::new_from_slice(shared_secret).map_err(|_| HttpSignaturesError::MissingKeyParam)?;
+    fn verify_signature_shared_secret(signature: &[u8], signature_base: &[u8], shared_secret: &[u8]) -> Result<(), HttpSignaturesError> {
+        let mut hmac = Hmac::<Sha256>::new_from_slice(shared_secret).map_err(|err| {
+            warn!("Failed to create HMAC: {err}");
+            HttpSignaturesError::MissingKeyParam
+        })?;
         hmac.update(signature_base);
-        hmac.verify_slice(signature).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+        hmac.verify_slice(signature).map_err(|err| {
+            warn!("Failed to verify HMAC: {err}");
+            HttpSignaturesError::SignatureVerificationFailed
+        })?;
         Ok(())
+    }
+
+    /**
+     * Generates a shared secret signature.
+     *
+     * This function uses the shared secret to generate a signature
+     * for the provided signature base.
+     *
+     * #Arguments
+     *
+     * `shared_secret`: The shared secret used to generate the signature.
+     * `signature_base`: The base data to sign.
+     *
+     * #Returns
+     *
+     * This function returns a `Result` containing the generated signature
+     * or an error if the signature generation fails.
+     */
+    fn generate_signature_shared_secret(shared_secret: &[u8], signature_base: &[u8]) -> Result<Vec<u8>, HttpSignaturesError> {
+        let mut hmac = Hmac::<Sha256>::new_from_slice(shared_secret).map_err(|err| {
+            warn!("Failed to create HMAC: {err}");
+            HttpSignaturesError::SignatureGenerationFailed
+        })?;
+        hmac.update(signature_base);
+        let signature = hmac.finalize().into_bytes();
+        Ok(signature.to_vec())
     }
 
     /**
@@ -372,13 +487,58 @@ impl SecurityKeyEnum {
      */
     fn verify_rsa_pss_sha512(public_key: PKey<Public>, signature: &[u8], signature_base: &[u8]) -> Result<(), HttpSignaturesError> {
         let mut verifier = openssl::sign::Verifier::new(openssl::hash::MessageDigest::sha512(), &public_key).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
-        verifier.set_rsa_padding(openssl::rsa::Padding::PKCS1_PSS).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
-        verifier.update(signature_base).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
-        let result = verifier.verify(signature).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+        verifier.set_rsa_padding(openssl::rsa::Padding::PKCS1_PSS).map_err(|err| {
+            warn!("Failed to set RSA padding: {err}");
+            HttpSignaturesError::SignatureVerificationFailed
+        })?;
+        verifier.update(signature_base).map_err(|err| {
+            warn!("Failed to update verifier: {err}");
+            HttpSignaturesError::SignatureVerificationFailed
+        })?;
+        let result = verifier.verify(signature).map_err(|err| {
+            warn!("Failed to verify signature: {err}");
+            HttpSignaturesError::SignatureVerificationFailed
+        })?;
         if !result {
             return Err(HttpSignaturesError::SignatureVerificationFailed);
         }
         Ok(())
+    }
+
+    /**
+     * Generates an RSA PSS SHA-512 signature.
+     *
+     * This function uses the RSA private key to generate a signature
+     * for the provided signature data.
+     *
+     * #Arguments
+     *
+     * `private_key`: The RSA private key used to generate the signature.
+     * `signature_data`: The data to sign.
+     *
+     * #Returns
+     *
+     * This function returns a `Result` containing the generated signature
+     * or an error if the signature generation fails.
+     */
+    fn generate_rsa_pss_sha512_signature(private_key: PKey<Private>, signature_data: &[u8]) -> Result<Vec<u8>, HttpSignaturesError> {
+        let mut signer = openssl::sign::Signer::new(openssl::hash::MessageDigest::sha512(), &private_key).map_err(|err| {
+            warn!("Failed to create signer: {err}");
+            HttpSignaturesError::SignatureGenerationFailed
+        })?;
+        signer.set_rsa_padding(openssl::rsa::Padding::PKCS1_PSS).map_err(|err| {
+            warn!("Failed to set RSA padding: {err}");
+            HttpSignaturesError::SignatureGenerationFailed
+        })?;
+        signer.update(signature_data).map_err(|err| {
+            warn!("Failed to update signer: {err}");
+            HttpSignaturesError::SignatureGenerationFailed
+        })?;
+        let signature = signer.sign_to_vec().map_err(|err| {
+            warn!("Failed to sign data: {err}");
+            HttpSignaturesError::SignatureGenerationFailed
+        })?;
+        Ok(signature)
     }
 
     /**
@@ -399,14 +559,62 @@ impl SecurityKeyEnum {
      * if the signature is invalid.
      */
     fn verify_rsa_pkcs1_sha256(public_key: PKey<Public>, signature: &[u8], signature_base: &[u8]) -> Result<(), HttpSignaturesError> {
-        let mut verifier = openssl::sign::Verifier::new(openssl::hash::MessageDigest::sha256(), &public_key).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
-        verifier.set_rsa_padding(openssl::rsa::Padding::PKCS1).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
-        verifier.update(signature_base).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
-        let result = verifier.verify(signature).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+        let mut verifier = openssl::sign::Verifier::new(openssl::hash::MessageDigest::sha256(), &public_key).map_err(|err| {
+            warn!("Failed to create verifier: {err}");
+            HttpSignaturesError::SignatureVerificationFailed
+        })?;
+        verifier.set_rsa_padding(openssl::rsa::Padding::PKCS1).map_err(|err| {
+            warn!("Failed to set RSA padding: {err}");
+            HttpSignaturesError::SignatureVerificationFailed
+        })?;
+        verifier.update(signature_base).map_err(|err| {
+            warn!("Failed to update verifier: {err}");
+            HttpSignaturesError::SignatureVerificationFailed
+        })?;
+        let result = verifier.verify(signature).map_err(|err| {
+            warn!("Failed to verify RSA PKCS#1 SHA-256 signature: {err}");
+            HttpSignaturesError::SignatureVerificationFailed
+        })?;
         if !result {
             return Err(HttpSignaturesError::SignatureVerificationFailed);
         }
         Ok(())
+    }
+
+    /**
+     * Generates an RSA PKCS#1 SHA-256 signature.
+     *
+     * This function uses the RSA private key to generate a signature
+     * for the provided signature data.
+     *
+     * #Arguments
+     *
+     * `private_key`: The RSA private key used to generate the signature.
+     * `signature_data`: The data to sign.
+     *
+     * #Returns
+     *
+     * This function returns a `Result` containing the generated signature
+     * or an error if the signature generation fails.
+     */
+    fn generate_rsa_pkcs1_sha256_signature(private_key: PKey<Private>, signature_data: &[u8]) -> Result<Vec<u8>, HttpSignaturesError> {
+        let mut signer = openssl::sign::Signer::new(openssl::hash::MessageDigest::sha256(), &private_key).map_err(|err| {
+            warn!("Failed to create signer: {err}");
+            HttpSignaturesError::SignatureGenerationFailed
+        })?;
+        signer.set_rsa_padding(openssl::rsa::Padding::PKCS1).map_err(|err| {
+            warn!("Failed to set RSA padding: {err}");
+            HttpSignaturesError::SignatureGenerationFailed
+        })?;
+        signer.update(signature_data).map_err(|err| {
+            warn!("Failed to update signer: {err}");
+            HttpSignaturesError::SignatureGenerationFailed
+        })?;
+        let signature = signer.sign_to_vec().map_err(|err| {
+            warn!("Failed to sign data: {err}");
+            HttpSignaturesError::SignatureGenerationFailed
+        })?;
+        Ok(signature)
     }
 
     /**
@@ -427,12 +635,50 @@ impl SecurityKeyEnum {
      * if the signature is invalid.
      */
     fn verify_ecdsa_p256_sha256(public_key: PKey<Public>, signature: &[u8], signature_base: &[u8]) -> Result<(), HttpSignaturesError> {
-        let mut verifier = openssl::sign::Verifier::new(MessageDigest::sha256(), &public_key).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
-        let result = verifier.verify_oneshot(signature, signature_base).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+        let mut verifier = openssl::sign::Verifier::new(MessageDigest::sha256(), &public_key).map_err(|err| {
+            warn!("Failed to create verifier: {err}");
+            HttpSignaturesError::SignatureVerificationFailed
+        })?;
+        let result = verifier.verify_oneshot(signature, signature_base).map_err(|err| {
+            warn!("Failed to verify ECDSA P-256 SHA-256 signature: {err}");
+            HttpSignaturesError::SignatureVerificationFailed
+        })?;
         if !result {
             return Err(HttpSignaturesError::SignatureVerificationFailed);
         }
         Ok(())
+    }
+
+    /**
+     * Generates an ECDSA P-256 SHA-256 signature.
+     *
+     * This function uses the ECDSA P-256 private key to generate a signature
+     * for the provided signature data.
+     *
+     * #Arguments
+     *
+     * `private_key`: The ECDSA P-256 private key used to generate the signature.
+     * `signature_data`: The data to sign.
+     *
+     * #Returns
+     *
+     * This function returns a `Result` containing the generated signature
+     * or an error if the signature generation fails.
+     */
+    fn generate_ecdsa_p256_sha256_signature(private_key: PKey<Private>, signature_data: &[u8]) -> Result<Vec<u8>, HttpSignaturesError> {
+        let mut signer = openssl::sign::Signer::new(MessageDigest::sha256(), &private_key).map_err(|err| {
+            warn!("Failed to create signer: {err}");
+            HttpSignaturesError::SignatureGenerationFailed
+        })?;
+        signer.update(signature_data).map_err(|err| {
+            warn!("Failed to update signer: {err}");
+            HttpSignaturesError::SignatureGenerationFailed
+        })?;
+        let signature = signer.sign_to_vec().map_err(|err| {
+            warn!("Failed to sign data: {err}");
+            HttpSignaturesError::SignatureGenerationFailed
+        })?;
+        Ok(signature)
     }
 
     /**
@@ -453,13 +699,51 @@ impl SecurityKeyEnum {
      * if the signature is invalid.
      */
     fn verify_ecdsa_p384_sha384(public_key: PKey<Public>, signature: &[u8], signature_base: &[u8]) -> Result<(), HttpSignaturesError> {
-        let mut verifier = openssl::sign::Verifier::new(MessageDigest::sha384(), &public_key).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
-        let result = verifier.verify_oneshot(signature, signature_base).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+        let mut verifier = openssl::sign::Verifier::new(MessageDigest::sha384(), &public_key).map_err(|err| {
+            warn!("Failed to create verifier: {err}");
+            HttpSignaturesError::SignatureVerificationFailed
+        })?;
+        let result = verifier.verify_oneshot(signature, signature_base).map_err(|err| {
+            warn!("Failed to verify ECDSA P-384 SHA-384 signature: {err}");
+            HttpSignaturesError::SignatureVerificationFailed
+        })?;
         if !result {
             return Err(HttpSignaturesError::SignatureVerificationFailed);
         }
         Ok(())
     }
+
+    /**
+     * Generates an ECDSA P-384 SHA-384 signature.
+     *
+     * This function uses the ECDSA P-384 private key to generate a signature
+     * for the provided signature data.
+     *
+     * #Arguments
+     *
+     * `private_key`: The ECDSA P-384 private key used to generate the signature.
+     * `signature_data`: The data to sign.
+     *
+     * #Returns
+     *
+     * This function returns a `Result` containing the generated signature
+     * or an error if the signature generation fails.
+     */
+    fn generate_ecdsa_p384_sha384_signature(private_key: PKey<Private>, signature_data: &[u8]) -> Result<Vec<u8>, HttpSignaturesError> {
+        let mut signer = openssl::sign::Signer::new(MessageDigest::sha384(), &private_key).map_err(|err| {
+            warn!("Failed to create signer: {err}");
+            HttpSignaturesError::SignatureGenerationFailed
+        })?;
+        signer.update(signature_data).map_err(|err| {
+            warn!("Failed to update signer: {err}");
+            HttpSignaturesError::SignatureGenerationFailed
+        })?;
+        let signature = signer.sign_to_vec().map_err(|err| {
+            warn!("Failed to sign data: {err}");
+            HttpSignaturesError::SignatureGenerationFailed
+        })?;
+        Ok(signature)
+    } 
 
     /**
      * Verifies an Ed25519 signature.
@@ -479,12 +763,46 @@ impl SecurityKeyEnum {
      * if the signature is invalid.
      */
     fn verify_ed25519(public_key: PKey<Public>, signature: &[u8], signature_base: &[u8]) -> Result<(), HttpSignaturesError> {
-        let mut verifier = openssl::sign::Verifier::new_without_digest(&public_key).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
-        let result = verifier.verify_oneshot(signature, signature_base).map_err(|_| HttpSignaturesError::SignatureVerificationFailed)?;
+        let mut verifier = openssl::sign::Verifier::new_without_digest(&public_key).map_err(|err| {
+            warn!("Failed to create verifier: {err}");
+            HttpSignaturesError::SignatureVerificationFailed
+        })?;
+        let result = verifier.verify_oneshot(signature, signature_base).map_err(|err| {
+            warn!("Failed to verify Ed25519 signature: {err}");
+            HttpSignaturesError::SignatureVerificationFailed
+        })?;
         if !result {
             return Err(HttpSignaturesError::SignatureVerificationFailed);
         }
         Ok(())
+    }
+
+    /**
+     * Generates an Ed25519 signature.
+     *
+     * This function uses the Ed25519 private key to generate a signature
+     * for the provided signature data.
+     *
+     * #Arguments
+     *
+     * `private_key`: The Ed25519 private key used to generate the signature.
+     * `signature_data`: The data to sign.
+     *
+     * #Returns
+     *
+     * This function returns a `Result` containing the generated signature
+     * or an error if the signature generation fails.
+     */
+    fn generate_ed25519_signature(private_key: PKey<Private>, signature_data: &[u8]) -> Result<Vec<u8>, HttpSignaturesError> {
+        let mut signer = openssl::sign::Signer::new_without_digest(&private_key).map_err(|err| {
+            warn!("Failed to create signer: {err}");
+            HttpSignaturesError::SignatureGenerationFailed
+        })?;
+        let signature = signer.sign_oneshot_to_vec(signature_data).map_err(|err| {
+            warn!("Failed to sign data: {err}");
+            HttpSignaturesError::SignatureGenerationFailed
+        })?;
+        Ok(signature)
     }
 
 }
@@ -559,6 +877,10 @@ pub enum HttpSignaturesError {
      * For hmac this is the shared secret.
      */
     MissingKeyParam,
+    /**
+     * Error indicating that the signature generation failed.
+     */
+    SignatureGenerationFailed,
 }
 
 /**
@@ -1849,28 +2171,57 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_request_generate_signature_elements_rsa() {
-        let key_pair = RsaKeyPair::from_pkcs8(&fs::read("test_config/keys/private_key1.pk8").unwrap()).unwrap();
-        let signature_base = "\"x-fd-userid\": 123456789
-\"x-request-id\": 78867567565464
-\"@method\": DELETE
-\"@signature-params\": (\"x-fd-userid\" \"x-request-id\" \"@method\");alg=\"rsa-pss-sha512\";keyid=\"key1\";created=1755289691;expires=1955289991";
-        let rand = SystemRandom::new();
-        let mut signature_result = vec![0; key_pair.public().modulus_len()];
-        key_pair.sign(&RSA_PSS_SHA512, &rand, signature_base.as_bytes(), &mut signature_result).unwrap();
-        let signature = STANDARD.encode(&signature_result);
-        println!("Signature: \n{signature:?}");
+    async fn test_generate_signature_rsa_pss_sha512() {
+        let security_enum_private_key = SecurityKeyEnum::PrivateKey { contents: fs::read("test_config/keys/private_key1.pem").unwrap(), algorithm: Algorithm::RsaPssSha512 };
+        let security_key_public_key = SecurityKeyEnum::PublicKey { contents: fs::read("test_config/keys/public_key1.pem").unwrap(), algorithm: Algorithm::RsaPssSha512 };
+        let signature = security_enum_private_key.generate_signature(b"test data").unwrap();
+        let verify = security_key_public_key.verify_signature(&signature, b"test data");
+        assert!(verify.is_ok());
     }
 
     #[tokio::test]
-    async fn test_generate_signature_elements_ed25519() {
-        let key_pair = Ed25519KeyPair::from_pkcs8_maybe_unchecked(&fs::read("test_config/keys/private_key4.pk8").unwrap()).unwrap();
-        let signature_base = "\"x-fd-userid\": 123456789
-\"x-request-id\": 78867567565464
-\"@method\": POST
-\"@signature-params\": (\"x-fd-userid\" \"x-request-id\" \"@method\");alg=\"ed25519\";keyid=\"key4\";created=1755289691;expires=1955289991";
-        let sign = key_pair.sign(signature_base.as_bytes());
-        let signature = STANDARD.encode(sign.as_ref());
-        println!("Signature: \n{signature:?}");
+    async fn test_generate_signature_rsa_pkcs1_sha256() {
+        let security_enum_private_key = SecurityKeyEnum::PrivateKey { contents: fs::read("test_config/keys/private_key2.pem").unwrap(), algorithm: Algorithm::RsaPkcs1Sha256 };
+        let security_key_public_key = SecurityKeyEnum::PublicKey { contents: fs::read("test_config/keys/public_key2.pem").unwrap(), algorithm: Algorithm::RsaPkcs1Sha256 };
+        let signature = security_enum_private_key.generate_signature(b"test data").unwrap();
+        let verify = security_key_public_key.verify_signature(&signature, b"test data");
+        assert!(verify.is_ok());
     }
+
+    #[tokio::test]
+    async fn test_generate_signature_ecdsa_p256_sha256() {
+        let security_enum_private_key = SecurityKeyEnum::PrivateKey { contents: fs::read("test_config/keys/private_key5.pem").unwrap(), algorithm: Algorithm::EcdsaP256Sha256 };
+        let security_key_public_key = SecurityKeyEnum::PublicKey { contents: fs::read("test_config/keys/public_key5.pem").unwrap(), algorithm: Algorithm::EcdsaP256Sha256 };
+        let signature = security_enum_private_key.generate_signature(b"test data").unwrap();
+        let verify = security_key_public_key.verify_signature(&signature, b"test data");
+        assert!(verify.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_generate_signature_ecdsa_p384_sha384() {
+        let security_enum_private_key = SecurityKeyEnum::PrivateKey { contents: fs::read("test_config/keys/private_key6.pem").unwrap(), algorithm: Algorithm::EcdsaP384Sha384 };
+        let security_key_public_key = SecurityKeyEnum::PublicKey { contents: fs::read("test_config/keys/public_key6.pem").unwrap(), algorithm: Algorithm::EcdsaP384Sha384 };
+        let signature = security_enum_private_key.generate_signature(b"test data").unwrap();
+        let verify = security_key_public_key.verify_signature(&signature, b"test data");
+        assert!(verify.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_generate_signature_ed25519() {
+        let security_enum_private_key = SecurityKeyEnum::PrivateKey { contents: fs::read("test_config/keys/private_key4.pem").unwrap(), algorithm: Algorithm::Ed25519 };
+        let security_key_public_key = SecurityKeyEnum::PublicKey { contents: fs::read("test_config/keys/public_key4.pem").unwrap(), algorithm: Algorithm::Ed25519 };
+        let signature = security_enum_private_key.generate_signature(b"test data").unwrap();
+        let verify = security_key_public_key.verify_signature(&signature, b"test data");
+        assert!(verify.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_generate_signature_hmac_sha256() {
+        let security_enum_private_key = SecurityKeyEnum::SharedSecret { contents: "Test secret".to_string(), algorithm: Algorithm::HmacSha256 };
+        let security_key_public_key = SecurityKeyEnum::SharedSecret { contents: "Test secret".to_string(), algorithm: Algorithm::HmacSha256 };
+        let signature = security_enum_private_key.generate_signature(b"test data").unwrap();
+        let verify = security_key_public_key.verify_signature(&signature, b"test data");
+        assert!(verify.is_ok());
+    }
+
 }

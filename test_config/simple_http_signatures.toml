@@ -7,7 +7,7 @@ level = true
 ansi = false
 file = false
 logfile = "./logs/app.log"
-directives = ["sqlx::query=info",]
+directives = ["sqlx::query=debug",]
 
 [security]
 incomingVerificationRequirements = [
@@ -19,30 +19,36 @@ incomingVerificationRequirements = [
     "ExpiresRequired", 
 ]
 
-[security.secrets.key1.publicKeyFile]
+[security.verificationSecrets.key1.publicKeyFile]
 path = "./test_config/keys/public_key1.pem"
+algorithm = "rsa-pss-sha512"
 
-[security.secrets.key2.publicKeyFile]
+[security.verificationSecrets.key2.publicKeyFile]
 path = "./test_config/keys/public_key2.pem"
+algorithm = "rsa-pss-sha512"
 
-[security.secrets.key3.sharedSecret]
+[security.verificationSecrets.key3.sharedSecret]
 secret = "test"
+algorithm = "hmac-sha256"
 
-[security.secrets.key4.publicKeyFile]
+[security.verificationSecrets.key4.publicKeyFile]
 path = "./test_config/keys/public_key4.pem"
+algorithm = "ecdsa-p256-sha256"
 
-[security.secrets.key5.publicKeyFile]
+[security.verificationSecrets.key5.publicKeyFile]
 path = "./test_config/keys/public_key5.pem"
+algorithm = "ecdsa-p384-sha384"
 
-[security.secrets.key6.publicKeyFile]
+[security.verificationSecrets.key6.publicKeyFile]
 path = "./test_config/keys/public_key6.pem"
+algorithm = "ed25519"
 
 [server]
 workers = 50
 httpPort = 8080
 
 [database.dbType.postgresql]
-connectionString = ""
+connectionString = "postgres://postgres:1234@localhost:5432/statistics"
 maxConnections = 50
 minConnections = 5
 acquireTimeout = 6000
