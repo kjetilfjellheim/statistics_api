@@ -12,11 +12,11 @@ actix-web-httpauth = "0.8.2" # For HTTP authentication
 base64 = "0.22.1" # For base64 encoding/decoding
 tokio = { version = "1.47.1", features = ["full"] } # For async runtime
 serde = { version = "1.0.219", features = ["derive"] } # For serialization/deserialization
-serde_json = "1.0.142" # For JSON serialization/deserialization
+serde_json = "1.0.143" # For JSON serialization/deserialization
 futures-util = "0.3.31" # For async utilities
 jsonwebtoken = "9.3.1" # For JWT handling
 toml = "0.9.5" # For reading configuration files
-clap = { version = "4.5.45", features = ["derive"]} # For command line argument parsing
+clap = { version = "4.5.46", features = ["derive"]} # For command line argument parsing
 rustls = { version = "0.23.31", features = [] } # For TLS support
 rustls-pemfile = "2.2.0" # For handling PEM files
 chrono = { version = "0.4.41", features = ["serde"] } # For date and time handling

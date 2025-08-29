@@ -31,7 +31,7 @@ let authHeaders = {
 export default function () {
     let data = {};
     let res = http.post('http://localhost:8080/api/services/v1_0/values:list?startIndex=0&pageSize=100', '{\n\n}', authHeaders);
-    console.log(res);
+
     check(res, {        
         'status is 200': (r) => r.status === 200,
     });

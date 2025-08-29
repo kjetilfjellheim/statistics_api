@@ -18,6 +18,16 @@ incomingVerificationRequirements = [
     { HeaderRequired = { name = "x-fd-userid" } }, 
     "ExpiresRequired", 
 ]
+responseGenerationRequirements = [
+    { DerivedRequired = { name = "@status" } },
+    { HeaderRequiredIfIncluded = { name = "x-request-id" } },
+    { HeaderRequiredIfBodyPresent = { name = "content-type" } },
+    { HeaderRequiredIfBodyPresent = { name = "content-digest" } },
+    { GenerateExpires = { expires_secs = 300 } },
+    "GenerateCreated",
+]
+[security.generatingSecret]
+privateKey = { path = "./test_config/keys/private_key1.pem", algorithm = "rsa-pss-sha512" }
 
 [security.verificationSecrets.key1.publicKeyFile]
 path = "./test_config/keys/public_key1.pem"
@@ -48,7 +58,7 @@ workers = 50
 httpPort = 8080
 
 [database.dbType.postgresql]
-connectionString = ""
+connectionString = "postgres://postgres:1234@localhost:5432/statistics"
 maxConnections = 50
 minConnections = 5
 acquireTimeout = 6000

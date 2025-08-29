@@ -633,6 +633,42 @@ impl From<PaginationOutput> for PaginationResponse {
     }
 }
 
+/**
+ * Converts an HTTP request into a set of input elements for signature derivation.
+ */
+impl From<HttpRequest> for DeriveInputElements {
+    fn from(http_request: HttpRequest) -> Self {
+        DeriveInputElements::new(
+            Some(http_request.method().as_str()),
+            http_request.uri().path_and_query().map(|p| p.as_str()),
+            Some(http_request.uri().path()),
+            http_request.uri().path_and_query().map(|p| p.as_str()),
+            Some(http_request.full_url().authority()),
+            http_request.uri().scheme_str(),
+            http_request.uri().query(),
+            None,
+        )
+    }
+}
+
+/**
+ * Converts an HTTP response into a set of input elements for signature derivation.
+ */
+impl From<&mut HttpResponse> for DeriveInputElements {
+    fn from(http_response: &mut HttpResponse) -> Self {
+        DeriveInputElements::new(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(http_response.status().as_u16()),
+        )
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

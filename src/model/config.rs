@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use clap::{Parser, command};
 use serde::{Deserialize, Serialize};
 
-use crate::api::httpsignatures::VerificationRequirement;
+use crate::api::httpsignatures::{GenerationRequirement, VerificationRequirement};
 
 /**
  * Command-line arguments for the application.
@@ -125,6 +125,10 @@ pub struct AppSecurity {
      * Input security configuration.
      */
     pub incoming_verification_requirements: Option<HashSet<VerificationRequirement>>,
+    /**
+     * Output security configuration.
+     */
+    pub response_generation_requirements: Option<HashSet<GenerationRequirement>>,
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
@@ -207,6 +211,12 @@ mod test {
                 VerificationRequirement::DerivedRequired { name: "@path".to_string() },
                 VerificationRequirement::DerivedRequired { name: "@authority".to_string() },
             ])),
+            response_generation_requirements: Some(HashSet::from([
+                GenerationRequirement::HeaderRequiredIfIncluded { name: "x-request-ID".to_string() },
+                GenerationRequirement::GenerateCreated,
+                GenerationRequirement::GenerateExpires { expires_secs: 60 },
+                GenerationRequirement::DerivedRequired { name: "@method".to_string() },
+            ])),
             generating_secret: Some(SecretType::PrivateKey { path: "./test_config/private_keys/private_key.pem".to_string(), algorithm: "rsa-pss-sha512".to_string(), passphrase: None }),
         };
 
@@ -243,6 +253,11 @@ mod test {
         assert_eq!(deserialized.security.verification_secrets.get("key2").unwrap(), &SecretType::PublicKeyFile { path: "./test_config/public_keys/public_key2.pem".to_string(), algorithm: "rsa-pss-sha512".to_string() });
         assert_eq!(deserialized.security.verification_secrets.get("key3").unwrap(), &SecretType::SharedSecret { secret: "test".to_string(), algorithm: "hmac-sha256".to_string() });
         assert_eq!(deserialized.security.generating_secret, Some(SecretType::PrivateKey { path: "./test_config/private_keys/private_key.pem".to_string(), algorithm: "rsa-pss-sha512".to_string(), passphrase: None }));
-
+        assert_eq!(deserialized.security.response_generation_requirements, Some(HashSet::from([
+            GenerationRequirement::HeaderRequiredIfIncluded { name: "x-request-ID".to_string() },
+            GenerationRequirement::GenerateCreated,
+            GenerationRequirement::GenerateExpires { expires_secs: 60 },
+            GenerationRequirement::DerivedRequired { name: "@method".to_string() },
+        ])));
     }
 }

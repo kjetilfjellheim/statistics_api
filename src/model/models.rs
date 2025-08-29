@@ -139,8 +139,8 @@ impl MunicipalityAddInputType {
 /**
  * Converts from request data and jwt claim name to `MunicipalityAddInputType`.
  */
-impl From<(web::Json<MunicipalityAddRequest>, String)> for MunicipalityAddInputType {
-    fn from(from: (web::Json<MunicipalityAddRequest>, String)) -> Self {
+impl From<(&web::Json<MunicipalityAddRequest>, String)> for MunicipalityAddInputType {
+    fn from(from: (&web::Json<MunicipalityAddRequest>, String)) -> Self {
         MunicipalityAddInputType::new(from.0.id, from.0.name.clone(), from.1.clone())
     }
 }
@@ -347,8 +347,8 @@ impl ValuesListInputType {
 /**
  * Converts from `web::Json<ValuesListRequest>` to `ValuesListInputType`.
  */
-impl From<web::Json<ValuesListRequest>> for ValuesListInputType {
-    fn from(request: web::Json<ValuesListRequest>) -> Self {
+impl From<&web::Json<ValuesListRequest>> for ValuesListInputType {
+    fn from(request: &web::Json<ValuesListRequest>) -> Self {
         ValuesListInputType { id_municipality: request.municipality_id, id_statistic: request.statistic_id, year: request.year }
     }
 }
@@ -509,8 +509,8 @@ impl ValuesAddUpdateInputType {
     }
 }
 
-impl From<(web::Json<ValuesAddUpdateRequest>, String)> for ValuesAddUpdateInputType {
-    fn from(from: (web::Json<ValuesAddUpdateRequest>, String)) -> Self {
+impl From<(&web::Json<ValuesAddUpdateRequest>, String)> for ValuesAddUpdateInputType {
+    fn from(from: (&web::Json<ValuesAddUpdateRequest>, String)) -> Self {
         ValuesAddUpdateInputType::new(from.0.municipality_id, from.0.statistic_id, from.0.value, from.0.year, from.1.clone())
     }
 }
@@ -567,8 +567,8 @@ impl PaginationInput {
 /**
  * Converts from request query parameters to `PaginationInput`.
  */
-impl From<Query<PaginationQuery>> for PaginationInput {
-    fn from(query: Query<PaginationQuery>) -> Self {
+impl From<&Query<PaginationQuery>> for PaginationInput {
+    fn from(query: &Query<PaginationQuery>) -> Self {
         PaginationInput::new(query.start_index.unwrap_or(0), query.page_size.unwrap_or(100))
     }
 }

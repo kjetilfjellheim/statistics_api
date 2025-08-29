@@ -1,4 +1,4 @@
-use std::{collections::{HashMap, HashSet}, fmt::Display, str::FromStr};
+use std::{collections::{HashMap, HashSet}, fmt::{Display, Formatter}, str::FromStr};
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use hmac::{Hmac, Mac};
@@ -22,6 +22,14 @@ const SIGNATURE_ALGORITHM_HMAC_SHA256: &str = "hmac-sha256";
  */
 pub struct HttpSignaturesService {
     /**
+     * Secret key used for generating signatures.
+     */
+    generating_secret: Option<SecurityKeyEnum>,
+    /**
+     * Response signature generation requirements.
+     */
+    response_generation_requirements: Option<HashSet<GenerationRequirement>>,
+    /**
      * A set of requirements for input signature verification. If none then all signatures are accepted.
      */
     input_verification_requirements: Option<HashSet<VerificationRequirement>>,
@@ -37,14 +45,15 @@ impl HttpSignaturesService {
      * Creates a new instance of `HttpSignaturesService`.
      *
      * # Arguments
+     * `response_generation_requirements`: A set of requirements for response signature generation.
      * `input_verification_requirements`: A set of requirements for signature verification.
      * `input_keys`: A map of keys used for signature verification.
      *
      * # Returns
      * A new instance of `HttpSignaturesService`.  
      */
-    pub fn new(input_verification_requirements: Option<HashSet<VerificationRequirement>>, input_keys: HashMap<String, SecurityKeyEnum>) -> Self {
-        HttpSignaturesService { input_verification_requirements, input_keys }
+    pub fn new(generating_secret: Option<SecurityKeyEnum>, response_generation_requirements: Option<HashSet<GenerationRequirement>>, input_verification_requirements: Option<HashSet<VerificationRequirement>>, input_keys: HashMap<String, SecurityKeyEnum>) -> Self {
+        HttpSignaturesService { generating_secret, response_generation_requirements, input_verification_requirements, input_keys }
     }
 
     /**
@@ -73,6 +82,39 @@ impl HttpSignaturesService {
             debug!("Signature verified successfully");
         }
         Ok(())
+    }
+
+    /**
+     * Generates a response signature for the given headers and derived elements.
+     *
+     * # Arguments
+     * `headers`: The headers of the request.
+     * `derive_elements`: The derived elements for signature generation.
+     *
+     * # Returns
+     * A `Result` containing the generated signature or an error if generation fails.
+     */
+    pub fn generate_response_signature(&self, headers: &HashMap<String, String>, derive_elements: &DeriveInputElements, keyid: &str) -> Result<Option<(String, String)>, HttpSignaturesError> {
+        if let Some(requirements) = &self.response_generation_requirements &&
+            let Some(generating_secret) = &self.generating_secret {
+            debug!("Generating signature with headers: {:?}", headers);
+            
+            let signature_output = SignatureOutput::new(
+                headers,
+                derive_elements,
+                requirements,
+                keyid,
+                &generating_secret.get_algorithm_string(),
+                headers.contains_key("content-digest") || headers.contains_key("content-type") || headers.contains_key("content-length"),
+            );
+            let security_key = self.generating_secret.as_ref().ok_or(HttpSignaturesError::MissingGeneratingSecret)?;
+            let signature = Self::sign(signature_output.alg.as_str(), security_key, signature_output.get_signature_base().as_bytes())?;
+            debug!("Signature generated successfully");
+            if let Some(signature) = signature {
+                return Ok(Some((signature, format!("sig={}", signature_output.get_signature_params()))));
+            }
+        }
+        Ok(None)
     }
 
     /**
@@ -107,6 +149,25 @@ impl HttpSignaturesService {
         }
         security_key.verify_signature(signature, signature_base)?;
         Ok(())
+    }
+
+    /**
+     * Signs the signature base using the provided algorithm and private key.
+     *
+     * # Arguments
+     * `algorithm`: The signature algorithm used (e.g., "RSA-PSS-SHA256").
+     * `security_key`: The key parameters for signing.
+     * `signature_base`: The base string to sign.
+     *
+     * # Returns
+     * A `Result` containing the generated signature or an error if signing fails.
+     */
+    fn sign(algorithm: &str, security_key: &SecurityKeyEnum, signature_base: &[u8]) -> Result<Option<String>, HttpSignaturesError> {
+        if algorithm != security_key.get_algorithm_string() {
+            return Err(HttpSignaturesError::InvalidSignatureFormat);
+        }
+        let signature = security_key.generate_signature(signature_base)?;
+        Ok(Some(format!("sig=:{}:", STANDARD.encode(signature))))
     }
 }
 
@@ -249,7 +310,7 @@ pub enum SecurityKeyEnum {
     /**
      * The private key used for signature generation.
      */
-    PrivateKey{ contents: Vec<u8>, algorithm: Algorithm },
+    PrivateKey{ contents: Vec<u8>, algorithm: Algorithm, _passphrase: Option<String> },
 }
 
 impl SecurityKeyEnum {
@@ -314,14 +375,14 @@ impl SecurityKeyEnum {
      */
     fn generate_signature(&self, signature_base: &[u8]) -> Result<Vec<u8>, HttpSignaturesError> {
         match self {
-            SecurityKeyEnum::PrivateKey { algorithm, contents } => {
+            SecurityKeyEnum::PrivateKey { algorithm, contents , _passphrase } => {
                 Self::generate_signature_private_key(algorithm, contents, signature_base)
             },
             SecurityKeyEnum::SharedSecret { algorithm: _, contents } => {
                 Self::generate_signature_shared_secret(contents.as_bytes(), signature_base)
             },
             SecurityKeyEnum::PublicKey { .. } => {
-                return Err(HttpSignaturesError::UnsupportedAlgorithm { details: "Public key generation not supported".into() });
+                Err(HttpSignaturesError::UnsupportedAlgorithm { details: "Public key generation not supported".into() })
             },
         }
     }
@@ -365,7 +426,7 @@ impl SecurityKeyEnum {
             Algorithm::Ed25519 => {
                 Self::verify_ed25519(public_key, signature, signature_base)?
             },
-            _ => return Err(HttpSignaturesError::UnsupportedAlgorithm { details: format!("Unsupported algorithm: {:?}", algorithm) }),
+            _ => return Err(HttpSignaturesError::UnsupportedAlgorithm { details: format!("Unsupported algorithm: {algorithm:?}") }),
         };
         Ok(())
     }
@@ -407,7 +468,7 @@ impl SecurityKeyEnum {
             Algorithm::Ed25519 => {
                 Self::generate_ed25519_signature(private_key, signature)?
             },
-            _ => return Err(HttpSignaturesError::UnsupportedAlgorithm { details: format!("Unsupported algorithm: {:?}", algorithm) }),
+            _ => return Err(HttpSignaturesError::UnsupportedAlgorithm { details: format!("Unsupported algorithm: {algorithm:?}") }),
         };
         Ok(generated_signature)
     }
@@ -891,6 +952,36 @@ pub enum HttpSignaturesError {
      * Error indicating that the signature generation failed.
      */
     SignatureGenerationFailed { details: String },
+    /**
+     * Error indicating that the generating secret is missing, but configuration is present.
+     */
+    MissingGeneratingSecret
+}
+
+impl Display for HttpSignaturesError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HttpSignaturesError::InvalidSignatureFormat => write!(f, "Invalid signature format"),
+            HttpSignaturesError::KeyNotFound { keyid } => write!(f, "Key not found: {keyid}"),
+            HttpSignaturesError::MissingExpiresTimestamp => write!(f, "Missing expires timestamp"),
+            HttpSignaturesError::MissingSignatureHeader => write!(f, "Missing signature header"),
+            HttpSignaturesError::MissingSignatureInputHeader => write!(f, "Missing signature input header"),
+            HttpSignaturesError::MissingCreatedTimestamp => write!(f, "Missing created timestamp"),
+            HttpSignaturesError::MissingRequiredHeader => write!(f, "Missing required header"),
+            HttpSignaturesError::MissingRequiredDerivedValue => write!(f, "Missing required derived value"),
+            HttpSignaturesError::MissingAlgorithm => write!(f, "Missing algorithm"),
+            HttpSignaturesError::MissingKeyId => write!(f, "Missing key ID"),
+            HttpSignaturesError::MissingHeaderInRequest { name } => write!(f, "Missing header in request: {name}"),
+            HttpSignaturesError::NoSignatureElements => write!(f, "No signature elements"),
+            HttpSignaturesError::SignatureVerificationFailed { details } => write!(f, "Signature verification failed: {details}"),
+            HttpSignaturesError::SignatureExpired { expired } => write!(f, "Signature expired at timestamp: {expired}"),
+            HttpSignaturesError::FailedToReadKey => write!(f, "Failed to read key"),
+            HttpSignaturesError::HmacError => write!(f, "HMAC error"),
+            HttpSignaturesError::UnsupportedAlgorithm { details } => write!(f, "Unsupported algorithm: {details}"),
+            HttpSignaturesError::SignatureGenerationFailed { details } => write!(f, "Signature generation failed: {details}"),
+            HttpSignaturesError::MissingGeneratingSecret => write!(f, "Missing generating secret"),
+        }
+    }
 }
 
 /**
@@ -922,6 +1013,34 @@ pub enum VerificationRequirement {
      * Should the signature be checked for expiration.
      */
     CheckExpired,
+    /**
+     * Derived component that is required in the signature.
+     */
+    DerivedRequired { name: String },
+
+}
+
+/**
+ * Represents the requirements for generating a signature.
+ */
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GenerationRequirement {
+    /**
+     * Represents a header that is required in the signature if included in request/response.
+     */
+    HeaderRequiredIfIncluded { name: String },
+    /**
+     * Represents a header that is required in the signature if the body is present.
+     */
+    HeaderRequiredIfBodyPresent { name: String },
+    /**
+     * Is required required for the signature input.
+     */
+    GenerateCreated,
+    /**
+     * Is the expires required for the signature input.
+     */
+    GenerateExpires { expires_secs: usize},
     /**
      * Derived component that is required in the signature.
      */
@@ -965,6 +1084,228 @@ enum SignatureElementEnum {
     Status {
         value: String,
     },
+}
+
+#[derive(Debug)]
+struct SignatureOutput {
+    /**
+     * The signature elements.
+     * Example: sig=("date" "content-type" "content-digest" "@method" "@request-target")
+     */
+    sig: Vec<SignatureElementEnum>,
+    /**
+     * The algorithm used for the signature.
+     * Example: alg="rsa-pss-sha512"
+     */
+    alg: String,
+    /**
+     * The key ID used for the signature.
+     * Example: keyid="keyid"
+     */
+    keyid: String,
+    /**
+     * The timestamp when the signature was created.
+     * Example: created=1754334782
+     */
+    created: Option<usize>,
+    /**
+     * The timestamp when the signature expires.
+     * Example: expires=1754335082
+     */
+    expires: Option<usize>,
+}
+
+impl SignatureOutput {
+    /**
+     * Creates a new `SignatureOutput` instance.
+     * This function initializes the signature output with the provided headers, derived elements,
+     * requirements, key ID, algorithm, and body presence flag.
+     * 
+     * # Algorithms
+     * `headers`: A map of header names to their values.
+     * `derive_elements`: The elements derived from the request for signature generation.
+     * `requirements`: The requirements that must be met for the signature.
+     * `keyid`: The key ID to use for the signature.
+     * `alg`: The algorithm to use for the signature.
+     * `has_body`: Whether the request has a body.
+     * 
+     */
+    fn new(headers: &HashMap<String, String>, derive_elements: &DeriveInputElements, requirements: &HashSet<GenerationRequirement>, keyid: &str, alg: &str, has_body: bool) -> Self {
+        let mut sig: Vec<SignatureElementEnum> = Vec::new();
+        let mut created = None;
+        let mut expires = None;
+        for requirement in requirements {
+            match requirement {
+                GenerationRequirement::HeaderRequiredIfIncluded { name } => {
+                    if headers.contains_key(name) {
+                       sig.push(SignatureElementEnum::HeaderString { name: name.clone(), value: headers.get(name).cloned().unwrap_or_default() } );
+                    }
+                }
+                GenerationRequirement::HeaderRequiredIfBodyPresent { name } => {
+                    if has_body && headers.contains_key(name) {
+                       sig.push(SignatureElementEnum::HeaderString { name: name.clone(), value: headers.get(name).cloned().unwrap_or_default() } );
+                    }
+                }
+                GenerationRequirement::GenerateCreated => {
+                    if headers.get("created").is_none() {
+                        created = Some(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as usize);
+                    }
+                }
+                GenerationRequirement::GenerateExpires { expires_secs } => {
+                    if headers.get("expires").is_none() {
+                        expires = Some(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as usize + expires_secs);
+                    }
+                }
+                GenerationRequirement::DerivedRequired { name } => {
+                    match name.as_str() {
+                        "@method" => {
+                            if let Some(method) = derive_elements.method.as_ref() {
+                                sig.insert(0, SignatureElementEnum::Method { value: method.clone() });
+                            }
+                        }
+                        "@request-target" => {
+                            if let Some(request_target) = derive_elements.request_target.as_ref() {
+                                sig.insert(0, SignatureElementEnum::RequestTarget { value: request_target.clone() });
+                            }
+                        }
+                        "@query" => {
+                            if let Some(query) = derive_elements.query.as_ref() {
+                                sig.insert(0, SignatureElementEnum::Query { value: query.clone() });
+                            }
+                        }
+                        "@path" => {
+                            if let Some(path) = derive_elements.path.as_ref() {
+                                sig.insert(0, SignatureElementEnum::Path { value: path.clone() });
+                            }
+                        }
+                        "@target-uri" => {
+                            if let Some(target_uri) = derive_elements.target_uri.as_ref() {
+                                sig.insert(0, SignatureElementEnum::TargetUri { value: target_uri.clone() });
+                            }
+                        }
+                        "@authority" => {
+                            if let Some(authority) = derive_elements.authority.as_ref() {
+                                sig.insert(0, SignatureElementEnum::Authority { value: authority.clone() });
+                            }
+                        }
+                        "@scheme" => {
+                            if let Some(scheme) = derive_elements.scheme.as_ref() {
+                                sig.insert(0, SignatureElementEnum::Scheme { value: scheme.clone() });
+                            }
+                        }
+                        "@status" => {
+                            if let Some(status) = derive_elements.status.as_ref() {
+                                sig.insert(0, SignatureElementEnum::Status { value: (*status.to_string()).into() });
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        SignatureOutput { sig, alg: alg.to_string(), keyid: keyid.to_string(), created, expires }
+    }
+
+    /**
+     * Returns the signature parameters as a string.
+     *
+     * The sig= is not included.
+     * Example: sig=("date" "content-type" "content-digest" "@method" "@request-target");alg="rsa-pss-sha512";keyid="keyid";created=1754334782;expires=1754335082
+     */
+    fn get_signature_params(&self) -> String {
+        let mut signature_params = String::new();
+        for element in &self.sig {
+            if !signature_params.is_empty() {
+                signature_params.push(' ');
+            } else {
+                signature_params.push('(');
+            }
+            match element {
+                SignatureElementEnum::HeaderString { name, value: _ } => {
+                    signature_params.push_str(&format!("\"{name}\""));
+                }
+                SignatureElementEnum::Method { value: _ } => {
+                    signature_params.push_str("\"@method\"");
+                }
+                SignatureElementEnum::RequestTarget { value: _ } => {
+                    signature_params.push_str("\"@request-target\"");
+                }
+                SignatureElementEnum::Query { value: _ } => {
+                    signature_params.push_str("\"@query\"");
+                }
+                SignatureElementEnum::Path { value: _ } => {
+                    signature_params.push_str("\"@path\"");
+                }
+                SignatureElementEnum::TargetUri { value: _ } => {
+                    signature_params.push_str("\"@target-uri\"");
+                }
+                SignatureElementEnum::Authority { value: _ } => {
+                    signature_params.push_str("\"@authority\"");
+                }
+                SignatureElementEnum::Scheme { value: _ } => {
+                    signature_params.push_str("\"@scheme\"");
+                }
+                SignatureElementEnum::Status { value: _ } => {
+                    signature_params.push_str("\"@status\"");
+                }
+            }
+        }
+        signature_params.push_str(");alg=\"");
+        signature_params.push_str(&self.alg);
+        signature_params.push_str("\";keyid=\"");
+        signature_params.push_str(&self.keyid);
+        signature_params.push('\"');
+        if let Some(created) = self.created {
+            signature_params.push_str(&format!(";created={created}"));
+        }
+        if let Some(expires) = self.expires {
+            signature_params.push_str(&format!(";expires={expires}"));
+        }
+        debug!("Signature Params: {}", signature_params);
+        signature_params
+    }
+
+    fn get_signature_base(&self) -> String {
+        let mut signature_base = String::new();
+        for element in &self.sig {
+            if !signature_base.is_empty() {
+                signature_base.push('\n');
+            }
+            match element {
+                SignatureElementEnum::HeaderString { name, value } => {
+                    signature_base.push_str(&format!("\"{}\": {}", name.to_lowercase(), value));
+                }
+                SignatureElementEnum::Method { value } => {
+                    signature_base.push_str(&format!("\"@method\": {}", value.to_uppercase()));
+                }
+                SignatureElementEnum::RequestTarget { value } => {
+                    signature_base.push_str(&format!("\"@request-target\": {}", value.to_lowercase()));
+                }
+                SignatureElementEnum::Query { value } => {
+                    signature_base.push_str(&format!("\"@query\": {value}"));
+                }
+                SignatureElementEnum::Path { value } => {
+                    signature_base.push_str(&format!("\"@path\": {value}"));
+                }
+                SignatureElementEnum::TargetUri { value } => {
+                    signature_base.push_str(&format!("\"@target-uri\": {value}"));
+                }
+                SignatureElementEnum::Authority { value } => {
+                    signature_base.push_str(&format!("\"@authority\": {value}"));
+                }
+                SignatureElementEnum::Scheme { value } => {
+                    signature_base.push_str(&format!("\"@scheme\": {value}"));
+                }
+                SignatureElementEnum::Status { value } => {
+                    signature_base.push_str(&format!("\"@status\": {value}"));
+                }
+            }
+        }
+        signature_base.push('\n');
+        signature_base.push_str(&format!("\"@signature-params\": {}", self.get_signature_params()));
+        debug!("Signature Base: \n{}", signature_base);
+        signature_base
+    }
 }
 
 /**
@@ -1362,6 +1703,9 @@ impl SignatureInput {
                 if name == "@scheme" {
                     derived = sig.iter().any(|f| matches!(f, SignatureElementEnum::Scheme { .. }));
                 }
+                if name == "@status" {
+                    derived = sig.iter().any(|f| matches!(f, SignatureElementEnum::Status { .. }));
+                }
                 derived
             }
             _ => true,
@@ -1473,8 +1817,7 @@ fn between<'a>(source: &'a str, start: &'a str, end: &'a str) -> Option<&'a str>
 #[cfg(test)]
 mod test {
     use std::{
-        collections::{HashMap, HashSet},
-        fs,
+        collections::{HashMap, HashSet}, fs, vec
     };
 
     use ring::{
@@ -1918,7 +2261,7 @@ mod test {
 
         let mut keys: HashMap<String, SecurityKeyEnum> = HashMap::new();
         keys.insert("key123".to_string(), SecurityKeyEnum::PublicKey { contents: public_key, algorithm: Algorithm::RsaPssSha512 });
-        let service = HttpSignaturesService::new(Some(requirements), keys);
+        let service = HttpSignaturesService::new(None, None, Some(requirements), keys);
         let result = service.verify_signature(&headers, &derive_elements);
         assert!(result.is_ok());
     }
@@ -1957,7 +2300,7 @@ mod test {
 
         let mut keys: HashMap<String, SecurityKeyEnum> = HashMap::new();
         keys.insert("key123".to_string(), SecurityKeyEnum::PublicKey { contents: public_key, algorithm: Algorithm::RsaPkcs1Sha256 });
-        let service = HttpSignaturesService::new(Some(requirements), keys);
+        let service = HttpSignaturesService::new(None, None, Some(requirements), keys);
         let result = service.verify_signature(&headers, &derive_elements);
         assert!(result.is_ok());
     }
@@ -1994,7 +2337,7 @@ mod test {
 
         let mut keys: HashMap<String, SecurityKeyEnum> = HashMap::new();
         keys.insert("key123".to_string(), SecurityKeyEnum::PublicKey { contents: public_key, algorithm: Algorithm::EcdsaP256Sha256 });
-        let service = HttpSignaturesService::new(Some(requirements), keys);
+        let service = HttpSignaturesService::new(None, None, Some(requirements), keys);
         let result = service.verify_signature(&headers, &derive_elements);
         assert!(result.is_ok());
     }
@@ -2031,7 +2374,7 @@ mod test {
 
         let mut keys: HashMap<String, SecurityKeyEnum> = HashMap::new();
         keys.insert("key123".to_string(), SecurityKeyEnum::PublicKey { contents: public_key, algorithm: Algorithm::EcdsaP384Sha384 });
-        let service = HttpSignaturesService::new(Some(requirements), keys);
+        let service = HttpSignaturesService::new(None, None, Some(requirements), keys);
         let result = service.verify_signature(&headers, &derive_elements);
         assert!(result.is_ok());
     }
@@ -2066,7 +2409,7 @@ mod test {
 
         let mut keys: HashMap<String, SecurityKeyEnum> = HashMap::new();
         keys.insert("key123".to_string(), SecurityKeyEnum::PublicKey { contents: fs::read("test_config/keys/public_key4.pem").unwrap(), algorithm: Algorithm::Ed25519 });
-        let service = HttpSignaturesService::new(Some(requirements), keys);
+        let service = HttpSignaturesService::new(None, None, Some(requirements), keys);
         let result = service.verify_signature(&headers, &derive_elements);
         assert!(result.is_ok());
     }
@@ -2098,7 +2441,7 @@ mod test {
 
         let mut keys: HashMap<String, SecurityKeyEnum> = HashMap::new();
         keys.insert("key123".to_string(), SecurityKeyEnum::SharedSecret { contents: "TestHMACKey".to_string(), algorithm: Algorithm::HmacSha256 });
-        let service = HttpSignaturesService::new(Some(requirements), keys);
+        let service = HttpSignaturesService::new(None, None, Some(requirements), keys);
         let result = service.verify_signature(&headers, &derive_elements);
         assert!(result.is_ok());
     }
@@ -2125,7 +2468,7 @@ mod test {
 
         let mut keys: HashMap<String, SecurityKeyEnum> = HashMap::new();
         keys.insert("key123".to_string(), SecurityKeyEnum::SharedSecret { contents: "TestHMACKey".to_string(), algorithm: Algorithm::HmacSha256 });
-        let service = HttpSignaturesService::new(Some(requirements), keys);
+        let service = HttpSignaturesService::new(None, None, Some(requirements), keys);
         let result = service.verify_signature(&headers, &derive_elements);
         assert!(result.is_ok());
     }
@@ -2182,7 +2525,7 @@ mod test {
 
     #[tokio::test]
     async fn test_generate_signature_rsa_pss_sha512() {
-        let security_enum_private_key = SecurityKeyEnum::PrivateKey { contents: fs::read("test_config/keys/private_key1.pem").unwrap(), algorithm: Algorithm::RsaPssSha512 };
+        let security_enum_private_key = SecurityKeyEnum::PrivateKey { contents: fs::read("test_config/keys/private_key1.pem").unwrap(), algorithm: Algorithm::RsaPssSha512, _passphrase: None };
         let security_key_public_key = SecurityKeyEnum::PublicKey { contents: fs::read("test_config/keys/public_key1.pem").unwrap(), algorithm: Algorithm::RsaPssSha512 };
         let signature = security_enum_private_key.generate_signature(b"test data").unwrap();
         let verify = security_key_public_key.verify_signature(&signature, b"test data");
@@ -2191,7 +2534,7 @@ mod test {
 
     #[tokio::test]
     async fn test_generate_signature_rsa_pkcs1_sha256() {
-        let security_enum_private_key = SecurityKeyEnum::PrivateKey { contents: fs::read("test_config/keys/private_key2.pem").unwrap(), algorithm: Algorithm::RsaPkcs1Sha256 };
+        let security_enum_private_key = SecurityKeyEnum::PrivateKey { contents: fs::read("test_config/keys/private_key2.pem").unwrap(), algorithm: Algorithm::RsaPkcs1Sha256, _passphrase: None };
         let security_key_public_key = SecurityKeyEnum::PublicKey { contents: fs::read("test_config/keys/public_key2.pem").unwrap(), algorithm: Algorithm::RsaPkcs1Sha256 };
         let signature = security_enum_private_key.generate_signature(b"test data").unwrap();
         let verify = security_key_public_key.verify_signature(&signature, b"test data");
@@ -2200,7 +2543,7 @@ mod test {
 
     #[tokio::test]
     async fn test_generate_signature_ecdsa_p256_sha256() {
-        let security_enum_private_key = SecurityKeyEnum::PrivateKey { contents: fs::read("test_config/keys/private_key5.pem").unwrap(), algorithm: Algorithm::EcdsaP256Sha256 };
+        let security_enum_private_key = SecurityKeyEnum::PrivateKey { contents: fs::read("test_config/keys/private_key5.pem").unwrap(), algorithm: Algorithm::EcdsaP256Sha256, _passphrase: None };
         let security_key_public_key = SecurityKeyEnum::PublicKey { contents: fs::read("test_config/keys/public_key5.pem").unwrap(), algorithm: Algorithm::EcdsaP256Sha256 };
         let signature = security_enum_private_key.generate_signature(b"test data").unwrap();
         let verify = security_key_public_key.verify_signature(&signature, b"test data");
@@ -2209,7 +2552,7 @@ mod test {
 
     #[tokio::test]
     async fn test_generate_signature_ecdsa_p384_sha384() {
-        let security_enum_private_key = SecurityKeyEnum::PrivateKey { contents: fs::read("test_config/keys/private_key6.pem").unwrap(), algorithm: Algorithm::EcdsaP384Sha384 };
+        let security_enum_private_key = SecurityKeyEnum::PrivateKey { contents: fs::read("test_config/keys/private_key6.pem").unwrap(), algorithm: Algorithm::EcdsaP384Sha384, _passphrase: None };
         let security_key_public_key = SecurityKeyEnum::PublicKey { contents: fs::read("test_config/keys/public_key6.pem").unwrap(), algorithm: Algorithm::EcdsaP384Sha384 };
         let signature = security_enum_private_key.generate_signature(b"test data").unwrap();
         let verify = security_key_public_key.verify_signature(&signature, b"test data");
@@ -2218,7 +2561,7 @@ mod test {
 
     #[tokio::test]
     async fn test_generate_signature_ed25519() {
-        let security_enum_private_key = SecurityKeyEnum::PrivateKey { contents: fs::read("test_config/keys/private_key4.pem").unwrap(), algorithm: Algorithm::Ed25519 };
+        let security_enum_private_key = SecurityKeyEnum::PrivateKey { contents: fs::read("test_config/keys/private_key4.pem").unwrap(), algorithm: Algorithm::Ed25519, _passphrase: None };
         let security_key_public_key = SecurityKeyEnum::PublicKey { contents: fs::read("test_config/keys/public_key4.pem").unwrap(), algorithm: Algorithm::Ed25519 };
         let signature = security_enum_private_key.generate_signature(b"test data").unwrap();
         let verify = security_key_public_key.verify_signature(&signature, b"test data");
@@ -2232,6 +2575,190 @@ mod test {
         let signature = security_enum_private_key.generate_signature(b"test data").unwrap();
         let verify = security_key_public_key.verify_signature(&signature, b"test data");
         assert!(verify.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_signature_output_format_no_body() {
+        let headers : HashMap<String, String> = vec![
+            ("date".to_string(), "Mon, 01 Jan 2024 00:00:00 GMT".to_string()),
+        ].into_iter().collect();
+        let derive_elements = DeriveInputElements::new(None, None, None, None, None, None, None, Some(204));
+        let requirements: HashSet<GenerationRequirement> = vec![
+            GenerationRequirement::GenerateCreated,
+            GenerationRequirement::GenerateExpires { expires_secs: 3600 },
+            GenerationRequirement::HeaderRequiredIfIncluded { name: "date".to_string() },
+            GenerationRequirement::DerivedRequired { name: "@status".to_string() }
+        ].into_iter().collect();
+        let signature_output = SignatureOutput::new(&headers, &derive_elements, &requirements, "key123", "rsa-pss-sha512", false);
+        assert!(signature_output.get_signature_params().starts_with("(\"@status\" \"date\");alg=\"rsa-pss-sha512\";keyid=\"key123\";"));
+        assert!(signature_output.get_signature_params().contains("created"));
+        assert!(signature_output.get_signature_params().contains("expires"));
+    }
+
+    #[tokio::test]
+    async fn test_signature_output_format_body() {
+        let headers : HashMap<String, String> = vec![
+            ("date".to_string(), "Mon, 01 Jan 2024 00:00:00 GMT".to_string()),
+            ("content-type".to_string(), "application/json".to_string()),
+            ("content-length".to_string(), "123".to_string()),
+            ("content-digest".to_string(), "sha256=abcdef1234567890".to_string()),
+        ].into_iter().collect();
+        let derive_elements = DeriveInputElements::new(None, None, None, None, None, None, None, Some(204));
+        let requirements: HashSet<GenerationRequirement> = vec![
+            GenerationRequirement::GenerateCreated,
+            GenerationRequirement::GenerateExpires { expires_secs: 3600 },
+            GenerationRequirement::HeaderRequiredIfIncluded { name: "date".to_string() },
+            GenerationRequirement::DerivedRequired { name: "@status".to_string() },
+            GenerationRequirement::HeaderRequiredIfBodyPresent { name: "content-type".to_string() },
+            GenerationRequirement::HeaderRequiredIfBodyPresent { name: "content-digest".to_string() },
+        ].into_iter().collect();
+        let signature_output = SignatureOutput::new(&headers, &derive_elements, &requirements, "key123", "rsa-pss-sha512", true);
+        assert!(signature_output.get_signature_params().contains("\"@status\""));
+        assert!(signature_output.get_signature_params().contains("\"date\""));
+        assert!(signature_output.get_signature_params().contains("\"content-type\""));
+        assert!(signature_output.get_signature_params().contains("\"content-digest\""));
+        assert!(signature_output.get_signature_params().contains("created"));
+        assert!(signature_output.get_signature_params().contains("expires"));
+    }
+
+    #[tokio::test]
+    async fn test_signature_output_format_no_created_and_no_expires() {
+        let headers : HashMap<String, String> = vec![
+            ("date".to_string(), "Mon, 01 Jan 2024 00:00:00 GMT".to_string()),
+            ("content-type".to_string(), "application/json".to_string()),
+            ("content-length".to_string(), "123".to_string()),
+            ("content-digest".to_string(), "sha256=abcdef1234567890".to_string()),
+        ].into_iter().collect();
+        let derive_elements = DeriveInputElements::new(None, None, None, None, None, None, None, Some(204));
+        let requirements: HashSet<GenerationRequirement> = vec![
+            GenerationRequirement::HeaderRequiredIfIncluded { name: "date".to_string() },
+            GenerationRequirement::DerivedRequired { name: "@status".to_string() },
+            GenerationRequirement::HeaderRequiredIfBodyPresent { name: "content-type".to_string() },
+            GenerationRequirement::HeaderRequiredIfBodyPresent { name: "content-digest".to_string() },
+        ].into_iter().collect();
+        let signature_output = SignatureOutput::new(&headers, &derive_elements, &requirements, "key123", "rsa-pss-sha512", true);
+        assert!(signature_output.get_signature_params().contains("\"@status\""));
+        assert!(signature_output.get_signature_params().contains("\"date\""));
+        assert!(signature_output.get_signature_params().contains("\"content-type\""));
+        assert!(signature_output.get_signature_params().contains("\"content-digest\""));
+        assert!(!signature_output.get_signature_params().contains("created"));
+        assert!(!signature_output.get_signature_params().contains("expires"));
+    }
+
+    #[tokio::test]
+    async fn test_generate_signature_base_no_body() {
+        let headers : HashMap<String, String> = vec![
+            ("date".to_string(), "Mon, 01 Jan 2024 00:00:00 GMT".to_string()),
+        ].into_iter().collect();
+        let derive_elements = DeriveInputElements::new(None, None, None, None, None, None, None, Some(204));
+        let requirements: HashSet<GenerationRequirement> = vec![
+            GenerationRequirement::GenerateCreated,
+            GenerationRequirement::GenerateExpires { expires_secs: 3600 },
+            GenerationRequirement::HeaderRequiredIfIncluded { name: "date".to_string() },
+            GenerationRequirement::DerivedRequired { name: "@status".to_string() }
+        ].into_iter().collect();
+        let signature_output = SignatureOutput::new(&headers, &derive_elements, &requirements, "key123", "rsa-pss-sha512", false);
+        let signature_base = signature_output.get_signature_base();
+        assert!(signature_base.starts_with("\"@status\": 204\n\"date\": Mon, 01 Jan 2024 00:00:00 GMT\n\"@signature-params\": (\"@status\" \"date\");alg=\"rsa-pss-sha512\";keyid=\"key123\""));
+    }
+
+    #[tokio::test]
+    async fn test_generate_signature_base_body() {
+        let headers : HashMap<String, String> = vec![
+            ("date".to_string(), "Mon, 01 Jan 2024 00:00:00 GMT".to_string()),
+            ("content-type".to_string(), "application/json".to_string()),
+            ("content-length".to_string(), "123".to_string()),
+            ("content-digest".to_string(), "sha256=abcdef1234567890".to_string()),
+        ].into_iter().collect();
+        let derive_elements = DeriveInputElements::new(None, None, None, None, None, None, None, Some(204));
+        let requirements: HashSet<GenerationRequirement> = vec![
+            GenerationRequirement::GenerateCreated,
+            GenerationRequirement::GenerateExpires { expires_secs: 3600 },
+            GenerationRequirement::HeaderRequiredIfIncluded { name: "date".to_string() },
+            GenerationRequirement::DerivedRequired { name: "@status".to_string() },
+            GenerationRequirement::HeaderRequiredIfBodyPresent { name: "content-type".to_string() },
+            GenerationRequirement::HeaderRequiredIfBodyPresent { name: "content-digest".to_string() },
+        ].into_iter().collect();
+        let signature_output = SignatureOutput::new(&headers, &derive_elements, &requirements, "key123", "rsa-pss-sha512", true);
+        let signature_base = signature_output.get_signature_base();
+        assert!(signature_base.contains("\"@status\""));
+        assert!(signature_base.contains("\"date\""));
+        assert!(signature_base.contains("\"content-type\""));
+        assert!(signature_base.contains("\"content-digest\""));
+        assert!(signature_base.contains("created"));
+        assert!(signature_base.contains("expires"));
+    }
+
+    #[tokio::test]
+    async fn test_signature_input_equals_output() {
+        let verify_requirements: HashSet<VerificationRequirement> = vec![
+            VerificationRequirement::HeaderRequired { name: "date".to_string() },
+            VerificationRequirement::HeaderRequiredIfBodyPresent { name: "content-type".to_string() },
+            VerificationRequirement::HeaderRequiredIfBodyPresent { name: "content-digest".to_string() },
+            VerificationRequirement::DerivedRequired { name: "@status".to_string() },
+        ].into_iter().collect();
+
+        let generate_requirements: HashSet<GenerationRequirement> = vec![
+            GenerationRequirement::GenerateCreated,
+            GenerationRequirement::GenerateExpires { expires_secs: 3600 },
+            GenerationRequirement::HeaderRequiredIfIncluded { name: "date".to_string() },
+            GenerationRequirement::DerivedRequired { name: "@status".to_string() },
+            GenerationRequirement::HeaderRequiredIfBodyPresent { name: "content-type".to_string() },
+            GenerationRequirement::HeaderRequiredIfBodyPresent { name: "content-digest".to_string() },
+        ].into_iter().collect();
+
+        let mut headers: HashMap<String, String> = vec![
+            ("date".to_string(), "Mon, 01 Jan 2024 00:00:00 GMT".to_string()),
+            ("content-type".to_string(), "application/json".to_string()),
+            ("content-length".to_string(), "123".to_string()),
+            ("content-digest".to_string(), "sha256=:abcdef1234567890:".to_string()),
+        ].into_iter().collect();
+
+        let derive_elements = DeriveInputElements::new(None, None, None, None, None, None, None, Some(200));
+
+        let signature_output = SignatureOutput::new(&headers, &derive_elements, &generate_requirements, "key123", "rsa-pss-sha512", true);
+
+        headers.insert("signature".to_string(), "sig=:test:".to_string());
+        headers.insert("signature-input".to_string(), format!("sig={}", signature_output.get_signature_params()));
+        let signature_input = SignatureInput::new(&headers, &derive_elements, &verify_requirements, true).unwrap();
+        assert_eq!(signature_output.get_signature_params(), signature_input.get_signature_params());
+        assert_eq!(signature_output.get_signature_base(), signature_input.get_signature_base());
+    }
+
+    #[tokio::test]
+    async fn test_generate_verify_rsa_pss_sha512_response() {
+        let generating_secret = SecurityKeyEnum::PrivateKey { contents: fs::read("test_config/keys/private_key1.pem").unwrap(), algorithm: Algorithm::RsaPssSha512, _passphrase: None };
+
+        let verifying_secret = SecurityKeyEnum::PublicKey { contents: fs::read("test_config/keys/public_key1.pem").unwrap(), algorithm: Algorithm::RsaPssSha512 };
+
+        let verify_requirements: HashSet<VerificationRequirement> = vec![
+            VerificationRequirement::HeaderRequired { name: "date".to_string() },
+            VerificationRequirement::HeaderRequiredIfBodyPresent { name: "content-type".to_string() },
+            VerificationRequirement::HeaderRequiredIfBodyPresent { name: "content-digest".to_string() },
+        ].into_iter().collect();
+
+        let generate_requirements: HashSet<GenerationRequirement> = vec![
+            GenerationRequirement::GenerateCreated,
+            GenerationRequirement::GenerateExpires { expires_secs: 3600 },
+            GenerationRequirement::HeaderRequiredIfIncluded { name: "date".to_string() },
+            GenerationRequirement::DerivedRequired { name: "@status".to_string() },
+            GenerationRequirement::HeaderRequiredIfBodyPresent { name: "content-type".to_string() },
+            GenerationRequirement::HeaderRequiredIfBodyPresent { name: "content-digest".to_string() },
+        ].into_iter().collect();
+
+        let http_signatures_service = HttpSignaturesService::new(Some(generating_secret), Some(generate_requirements), Some(verify_requirements), vec![("key123".to_string(), verifying_secret)].into_iter().collect());
+
+        let mut headers: HashMap<String, String> = vec![
+            ("date".to_string(), "Mon, 01 Jan 2024 00:00:00 GMT".to_string()),
+            ("content-type".to_string(), "application/json".to_string()),
+            ("content-length".to_string(), "123".to_string()),
+            ("content-digest".to_string(), "sha256=:abcdef1234567890:".to_string()),
+        ].into_iter().collect();
+        let derive_elements = DeriveInputElements::new(None, None, None, None, None, None, None, Some(200));
+        let signature = http_signatures_service.generate_response_signature(&headers, &derive_elements, "key123").unwrap().unwrap();
+        headers.insert("signature".to_string(), signature.0);
+        headers.insert("signature-input".to_string(), signature.1);
+        http_signatures_service.verify_signature(&headers, &derive_elements).unwrap();
     }
 
 }

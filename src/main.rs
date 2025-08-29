@@ -15,7 +15,7 @@ use crate::dao::statistics::StatisticsDao;
 use crate::model::apperror::{ApplicationError, ErrorType};
 use crate::model::config::{AppSecurity, ApplicationArguments, DatabaseType, HttpsConfig, SecretType};
 
-use crate::api::endpoints::{municipalities_add, municipalities_delete, municipalities_list, statistics_add, statistics_delete, statistics_list, value_add, value_delete, value_update, values_list};
+use crate::api::endpoints::{add_municipality, add_statistic, add_value, list_municipalities, list_statistics, list_values, delete_statistics, delete_municipality, delete_value, update_value};
 use crate::api::state::AppState;
 use crate::service::statistics::StatisticsService;
 use actix_web::middleware::{Logger, from_fn};
@@ -103,19 +103,17 @@ async fn main() -> std::io::Result<()> {
             .wrap(prometheus.clone())
             .wrap(Logger::new("\"%{x-request-id}i\" \"%{Referer}i\" \"%{User-Agent}i\" %a \"%r\" %s %b %T"))
             .wrap(from_fn(middleware::timing_middleware))
-            .wrap(from_fn(middleware::digest_verification_middleware))
-            .wrap(from_fn(middleware::signature_verification_middleware))
             .app_data(state.clone())
-            .service(statistics_list)
-            .service(statistics_add)
-            .service(statistics_delete)
-            .service(municipalities_list)
-            .service(municipalities_add)
-            .service(municipalities_delete)
-            .service(values_list)
-            .service(value_add)
-            .service(value_delete)
-            .service(value_update)
+            .service(add_municipality)
+            .service(add_statistic)
+            .service(add_value)
+            .service(list_municipalities)
+            .service(list_statistics)
+            .service(list_values)
+            .service(delete_statistics)
+            .service(delete_municipality)
+            .service(delete_value)
+            .service(update_value)
     });
 
     let server_init = if let Some(http_port) = &config.server.http_port { server_init.bind(("127.0.0.1", *http_port))? } else { server_init };
@@ -228,6 +226,17 @@ fn get_config(config_file: &str) -> Result<model::config::Config, std::io::Error
  * A `Result` containing the initialized `HttpSignaturesService` or an `std::io::Error` if initialization fails.
  */
 fn get_security_service(app_security: &AppSecurity) -> Result<HttpSignaturesService, std::io::Error> {
+    let generating_secret = match &app_security.generating_secret {
+        Some(SecretType::PrivateKey { path, algorithm, passphrase }) => {
+            let file_contents = fs::read(path).map_err(|err| std::io::Error::other(format!("Failed to read private key file: {err}")))?;
+            Some(SecurityKeyEnum::PrivateKey { contents: file_contents, algorithm: Algorithm::from_str(algorithm).map_err(|_err| std::io::Error::other(format!("Unsupported algorithm {algorithm} for generating secret")))? , _passphrase: passphrase.clone()})
+        },
+        Some(SecretType::SharedSecret { secret, algorithm }) => {
+            Some(SecurityKeyEnum::SharedSecret { contents: secret.clone(), algorithm: Algorithm::from_str(algorithm).map_err(|_err| std::io::Error::other(format!("Unsupported algorithm {algorithm} for generating secret")))? })
+        },
+        Some(_) => return Err(std::io::Error::other("Generating secret must be of type PrivateKey or SharedSecret")),
+        None => None,
+    };
     let keys = app_security
         .verification_secrets
         .iter()
@@ -237,8 +246,11 @@ fn get_security_service(app_security: &AppSecurity) -> Result<HttpSignaturesServ
                 Ok((keyid.clone(), SecurityKeyEnum::PublicKey { contents: file_contents, algorithm: Algorithm::from_str(algorithm).map_err(|_err| std::io::Error::other(format!("Unsupported algorithm {algorithm} for keyid {keyid}")))? }))
             }
             SecretType::SharedSecret { secret, algorithm } => Ok((keyid.clone(), SecurityKeyEnum::SharedSecret { contents: secret.clone(), algorithm: Algorithm::from_str(algorithm).map_err(|_err| std::io::Error::other(format!("Unsupported algorithm {algorithm} for keyid {keyid}")))? })),
-            _ => Err(std::io::Error::other(format!("Unsupported secret type for keyid {keyid}"))),
+            SecretType::PrivateKey { path, algorithm, passphrase } => {
+                let file_contents = fs::read(path).map_err(|err| std::io::Error::other(format!("Failed to read private key file: {err}")))?;
+                Ok((keyid.clone(), SecurityKeyEnum::PrivateKey { contents: file_contents, algorithm: Algorithm::from_str(algorithm).map_err(|_err| std::io::Error::other(format!("Unsupported algorithm {algorithm} for keyid {keyid}")))?, _passphrase: passphrase.clone() }))
+            }
         })
         .collect::<Result<HashMap<String, SecurityKeyEnum>, std::io::Error>>()?;
-    Ok(HttpSignaturesService::new(app_security.incoming_verification_requirements.clone(), keys))
+    Ok(HttpSignaturesService::new(generating_secret, app_security.response_generation_requirements.clone(), app_security.incoming_verification_requirements.clone(), keys))
 }
