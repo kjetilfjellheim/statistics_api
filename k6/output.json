@@ -1,0 +1,3 @@
+{"level":"error","msg":"test run was aborted because k6 received a 'interrupt' signal","time":"2025-08-31T01:00:24+02:00"}
+{"level":"error","msg":"test run was aborted because k6 received a 'interrupt' signal","time":"2025-08-31T01:03:05+02:00"}
+{"level":"error","msg":"test run was aborted because k6 received a 'interrupt' signal","time":"2025-08-31T01:04:18+02:00"}

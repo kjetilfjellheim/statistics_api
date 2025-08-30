@@ -227,12 +227,12 @@ fn get_config(config_file: &str) -> Result<model::config::Config, std::io::Error
  */
 fn get_security_service(app_security: &AppSecurity) -> Result<HttpSignaturesService, std::io::Error> {
     let generating_secret = match &app_security.generating_secret {
-        Some(SecretType::PrivateKey { path, algorithm, passphrase }) => {
+        Some(SecretType::PrivateKey { path, algorithm, passphrase, key_id }) => {
             let file_contents = fs::read(path).map_err(|err| std::io::Error::other(format!("Failed to read private key file: {err}")))?;
-            Some(SecurityKeyEnum::PrivateKey { contents: file_contents, algorithm: Algorithm::from_str(algorithm).map_err(|_err| std::io::Error::other(format!("Unsupported algorithm {algorithm} for generating secret")))? , _passphrase: passphrase.clone()})
+            Some(SecurityKeyEnum::PrivateKey { contents: file_contents, algorithm: Algorithm::from_str(algorithm).map_err(|_err| std::io::Error::other(format!("Unsupported algorithm {algorithm} for generating secret")))? , passphrase: passphrase.clone(), key_id: key_id.clone() })
         },
-        Some(SecretType::SharedSecret { secret, algorithm }) => {
-            Some(SecurityKeyEnum::SharedSecret { contents: secret.clone(), algorithm: Algorithm::from_str(algorithm).map_err(|_err| std::io::Error::other(format!("Unsupported algorithm {algorithm} for generating secret")))? })
+        Some(SecretType::SharedSecret { secret, algorithm, key_id }) => {
+            Some(SecurityKeyEnum::SharedSecret { contents: secret.clone(), algorithm: Algorithm::from_str(algorithm).map_err(|_err| std::io::Error::other(format!("Unsupported algorithm {algorithm} for generating secret")))?, key_id: key_id.clone() })
         },
         Some(_) => return Err(std::io::Error::other("Generating secret must be of type PrivateKey or SharedSecret")),
         None => None,
@@ -240,15 +240,15 @@ fn get_security_service(app_security: &AppSecurity) -> Result<HttpSignaturesServ
     let keys = app_security
         .verification_secrets
         .iter()
-        .map(|(keyid, secret_type)| match secret_type {
-            SecretType::PublicKeyFile { path, algorithm } => {
+        .map(|secret_type| match secret_type {
+            SecretType::PublicKeyFile { path, algorithm, key_id } => {
                 let file_contents = fs::read(path).map_err(|err| std::io::Error::other(format!("Failed to read public key file: {err}")))?;
-                Ok((keyid.clone(), SecurityKeyEnum::PublicKey { contents: file_contents, algorithm: Algorithm::from_str(algorithm).map_err(|_err| std::io::Error::other(format!("Unsupported algorithm {algorithm} for keyid {keyid}")))? }))
+                Ok((key_id.clone(), SecurityKeyEnum::PublicKey { contents: file_contents, algorithm: Algorithm::from_str(algorithm).map_err(|_err| std::io::Error::other(format!("Unsupported algorithm {algorithm} for keyid {key_id}")))?, key_id: key_id.clone() }))
             }
-            SecretType::SharedSecret { secret, algorithm } => Ok((keyid.clone(), SecurityKeyEnum::SharedSecret { contents: secret.clone(), algorithm: Algorithm::from_str(algorithm).map_err(|_err| std::io::Error::other(format!("Unsupported algorithm {algorithm} for keyid {keyid}")))? })),
-            SecretType::PrivateKey { path, algorithm, passphrase } => {
+            SecretType::SharedSecret { secret, algorithm, key_id } => Ok((key_id.clone(), SecurityKeyEnum::SharedSecret { contents: secret.clone(), algorithm: Algorithm::from_str(algorithm).map_err(|_err| std::io::Error::other(format!("Unsupported algorithm {algorithm} for keyid {key_id}")))?, key_id: key_id.clone() })),
+            SecretType::PrivateKey { path, algorithm, passphrase, key_id } => {
                 let file_contents = fs::read(path).map_err(|err| std::io::Error::other(format!("Failed to read private key file: {err}")))?;
-                Ok((keyid.clone(), SecurityKeyEnum::PrivateKey { contents: file_contents, algorithm: Algorithm::from_str(algorithm).map_err(|_err| std::io::Error::other(format!("Unsupported algorithm {algorithm} for keyid {keyid}")))?, _passphrase: passphrase.clone() }))
+                Ok((key_id.clone(), SecurityKeyEnum::PrivateKey { contents: file_contents, algorithm: Algorithm::from_str(algorithm).map_err(|_err| std::io::Error::other(format!("Unsupported algorithm {algorithm} for keyid {key_id}")))?, passphrase: passphrase.clone(), key_id: key_id.clone() }))
             }
         })
         .collect::<Result<HashMap<String, SecurityKeyEnum>, std::io::Error>>()?;

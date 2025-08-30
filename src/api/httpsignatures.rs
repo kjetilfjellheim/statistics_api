@@ -37,7 +37,7 @@ pub struct HttpSignaturesService {
      * A map of keys used for signature verification. The key ID is used to look up the public key.
      * The key ID is expected to be in the `keyid` field of the signature input.
      */
-    input_keys: HashMap<String, SecurityKeyEnum>,
+    verification_secrets: HashMap<String, SecurityKeyEnum>,
 }
 
 impl HttpSignaturesService {
@@ -52,8 +52,8 @@ impl HttpSignaturesService {
      * # Returns
      * A new instance of `HttpSignaturesService`.  
      */
-    pub fn new(generating_secret: Option<SecurityKeyEnum>, response_generation_requirements: Option<HashSet<GenerationRequirement>>, input_verification_requirements: Option<HashSet<VerificationRequirement>>, input_keys: HashMap<String, SecurityKeyEnum>) -> Self {
-        HttpSignaturesService { generating_secret, response_generation_requirements, input_verification_requirements, input_keys }
+    pub fn new(generating_secret: Option<SecurityKeyEnum>, response_generation_requirements: Option<HashSet<GenerationRequirement>>, input_verification_requirements: Option<HashSet<VerificationRequirement>>, verification_secrets: HashMap<String, SecurityKeyEnum>) -> Self {
+        HttpSignaturesService { generating_secret, response_generation_requirements, input_verification_requirements, verification_secrets }
     }
 
     /**
@@ -77,7 +77,7 @@ impl HttpSignaturesService {
                 requirements,
                 headers.contains_key("content-digest") || headers.contains_key("content-type") || headers.contains_key("content-length"),
             )?;
-            let security_key = self.input_keys.get(&signature_input.keyid).ok_or(HttpSignaturesError::KeyNotFound { keyid: signature_input.keyid.clone() })?;
+            let security_key = self.verification_secrets.get(&signature_input.keyid).ok_or(HttpSignaturesError::KeyNotFound { keyid: signature_input.keyid.clone() })?;
             Self::verify(signature_input.alg.as_str(), security_key, signature_input.get_signature_base().as_bytes(), &signature)?;
             debug!("Signature verified successfully");
         }
@@ -94,7 +94,7 @@ impl HttpSignaturesService {
      * # Returns
      * A `Result` containing the generated signature or an error if generation fails.
      */
-    pub fn generate_response_signature(&self, headers: &HashMap<String, String>, derive_elements: &DeriveInputElements, keyid: &str) -> Result<Option<(String, String)>, HttpSignaturesError> {
+    pub fn generate_response_signature(&self, headers: &HashMap<String, String>, derive_elements: &DeriveInputElements) -> Result<Option<(String, String)>, HttpSignaturesError> {
         if let Some(requirements) = &self.response_generation_requirements &&
             let Some(generating_secret) = &self.generating_secret {
             debug!("Generating signature with headers: {:?}", headers);
@@ -103,7 +103,7 @@ impl HttpSignaturesService {
                 headers,
                 derive_elements,
                 requirements,
-                keyid,
+                generating_secret.get_key_id(),
                 &generating_secret.get_algorithm_string(),
                 headers.contains_key("content-digest") || headers.contains_key("content-type") || headers.contains_key("content-length"),
             );
@@ -302,15 +302,15 @@ pub enum SecurityKeyEnum {
     /**
      * The public key used for signature verification.
      */
-    PublicKey{ contents: Vec<u8>, algorithm: Algorithm },
+    PublicKey{ contents: Vec<u8>, algorithm: Algorithm, key_id: String },
     /**
      * The shared secret used for hmac signature verification.
      */
-    SharedSecret{ contents: String, algorithm: Algorithm },
+    SharedSecret{ contents: String, algorithm: Algorithm, key_id: String },
     /**
      * The private key used for signature generation.
      */
-    PrivateKey{ contents: Vec<u8>, algorithm: Algorithm, _passphrase: Option<String> },
+    PrivateKey{ contents: Vec<u8>, algorithm: Algorithm, passphrase: Option<String>, key_id: String },
 }
 
 impl SecurityKeyEnum {
@@ -323,6 +323,17 @@ impl SecurityKeyEnum {
             SecurityKeyEnum::PublicKey { algorithm, .. } => algorithm.to_string(),
             SecurityKeyEnum::SharedSecret { algorithm, .. } => algorithm.to_string(),
             SecurityKeyEnum::PrivateKey { algorithm, .. } => algorithm.to_string(),
+        }
+    }
+
+    /**
+     * Returns the key id as a string.
+     */
+    fn get_key_id(&self) -> &str {
+        match self {
+            SecurityKeyEnum::PublicKey { key_id, .. } => key_id,
+            SecurityKeyEnum::SharedSecret { key_id, .. } => key_id,
+            SecurityKeyEnum::PrivateKey { key_id, .. } => key_id,
         }
     }
 
@@ -344,10 +355,10 @@ impl SecurityKeyEnum {
      */
     pub fn verify_signature(&self, signature: &[u8], signature_base: &[u8]) -> Result<(), HttpSignaturesError> {
         match self {
-            SecurityKeyEnum::PublicKey { algorithm, contents } => {
+            SecurityKeyEnum::PublicKey { algorithm, contents, key_id: _ } => {
                 Self::verify_signature_public_key(algorithm, contents, signature, signature_base)?;
             },
-            SecurityKeyEnum::SharedSecret { algorithm: _, contents } => {
+            SecurityKeyEnum::SharedSecret { algorithm: _, contents, key_id: _ } => {
                 Self::verify_signature_shared_secret(signature, signature_base, contents.as_bytes())?
             },
             SecurityKeyEnum::PrivateKey { .. } => {
@@ -375,10 +386,10 @@ impl SecurityKeyEnum {
      */
     fn generate_signature(&self, signature_base: &[u8]) -> Result<Vec<u8>, HttpSignaturesError> {
         match self {
-            SecurityKeyEnum::PrivateKey { algorithm, contents , _passphrase } => {
-                Self::generate_signature_private_key(algorithm, contents, signature_base)
+            SecurityKeyEnum::PrivateKey { algorithm, contents , passphrase: _, key_id: _ } => {
+                Self::generate_signature_private_key(algorithm, contents, signature_base,)
             },
-            SecurityKeyEnum::SharedSecret { algorithm: _, contents } => {
+            SecurityKeyEnum::SharedSecret { algorithm: _, contents, key_id: _ } => {
                 Self::generate_signature_shared_secret(contents.as_bytes(), signature_base)
             },
             SecurityKeyEnum::PublicKey { .. } => {
@@ -1268,9 +1279,6 @@ impl SignatureOutput {
     fn get_signature_base(&self) -> String {
         let mut signature_base = String::new();
         for element in &self.sig {
-            if !signature_base.is_empty() {
-                signature_base.push('\n');
-            }
             match element {
                 SignatureElementEnum::HeaderString { name, value } => {
                     signature_base.push_str(&format!("\"{}\": {}", name.to_lowercase(), value));
@@ -1300,10 +1308,10 @@ impl SignatureOutput {
                     signature_base.push_str(&format!("\"@status\": {value}"));
                 }
             }
+            signature_base.push('\n');
         }
-        signature_base.push('\n');
         signature_base.push_str(&format!("\"@signature-params\": {}", self.get_signature_params()));
-        debug!("Signature Base: \n{}", signature_base);
+        debug!("Output Signature Base: \n{}", signature_base);
         signature_base
     }
 }
@@ -1419,10 +1427,13 @@ impl SignatureInput {
         signature_params.push_str(&self.alg);
         signature_params.push_str("\";keyid=\"");
         signature_params.push_str(&self.keyid);
-        signature_params.push_str("\";created=");
-        signature_params.push_str(&self.created.map_or_else(|| "0".into(), |v| v.to_string()));
-        signature_params.push_str(";expires=");
-        signature_params.push_str(&self.expires.map_or_else(|| "0".into(), |v| v.to_string()));
+        signature_params.push('\"');
+        if let Some(created) = self.created {
+            signature_params.push_str(&format!(";created={created}"));
+        }
+        if let Some(expires) = self.expires {
+            signature_params.push_str(&format!(";expires={expires}"));
+        }
         debug!("Signature Params: {}", signature_params);
         signature_params
     }
@@ -1436,9 +1447,6 @@ impl SignatureInput {
     fn get_signature_base(&self) -> String {
         let mut signature_base = String::new();
         for element in &self.sig {
-            if !signature_base.is_empty() {
-                signature_base.push('\n');
-            }
             match element {
                 SignatureElementEnum::HeaderString { name, value } => {
                     signature_base.push_str(&format!("\"{name}\": {value}"));
@@ -1466,12 +1474,12 @@ impl SignatureInput {
                 }
                 SignatureElementEnum::Status { value } => {
                     signature_base.push_str(&format!("\"@status\": {value}"));
-                }
+                }            
             }
-        }
-        signature_base.push('\n');
+            signature_base.push('\n');
+        }        
         signature_base.push_str(&format!("\"@signature-params\": {}", self.get_signature_params()));
-        debug!("Signature Base: \n{:?}", signature_base.as_bytes());
+        debug!("Input Signature Base: \n{signature_base}");
         signature_base
     }
 
@@ -2122,7 +2130,7 @@ mod test {
 \"content-digest\": SHA-256=:qqlAJmTxpB9A67xSyZk+tmrrNmYClY/fqig7ceZNsSM=:
 \"@method\": POST
 \"@request-target\": /api/v1/resource
-\"@signature-params\": (\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754065546;expires=1754066746"
+\"@signature-params\": (\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754065546;expires=1754066746\n"
         );
     }
 
@@ -2162,7 +2170,7 @@ mod test {
 \"content-type\": application/json
 \"content-digest\": SHA-256=:qqlAJmTxpB9A67xSyZk+tmrrNmYClY/fqig7ceZNsSM=:
 \"@status\": 200
-\"@signature-params\": (\"date\" \"content-type\" \"content-digest\" \"@status\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754065546;expires=1754066746"
+\"@signature-params\": (\"date\" \"content-type\" \"content-digest\" \"@status\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754065546;expires=1754066746\n"
         );
     }
 
@@ -2193,7 +2201,7 @@ mod test {
             "\"date\": Mon, 01 Jan 2024 00:00:00 GMT
 \"@method\": POST
 \"@request-target\": /api/v1/resource
-\"@signature-params\": (\"date\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754175188;expires=1754175488"
+\"@signature-params\": (\"date\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754175188;expires=1754175488\n"
         );
     }
 
@@ -2223,7 +2231,7 @@ mod test {
             signature_base,
             "\"date\": Mon, 01 Jan 2024 00:00:00 GMT
 \"@status\": 200
-\"@signature-params\": (\"date\" \"@status\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754175188;expires=1754175488"
+\"@signature-params\": (\"date\" \"@status\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754175188;expires=1754175488\n"
         );
     }
 
@@ -2241,7 +2249,7 @@ mod test {
         let request_target = "/foo?param=value&pet=dog";
 
         let signature_str = format!(
-            "\"date\": Tue, 20 Apr 2021 02:07:55 GMT\n\"content-type\": application/json\n\"content-digest\": sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:\n\"@method\": {method}\n\"@request-target\": {request_target}\n\"@signature-params\": (\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754409493;expires=1754409793"
+            "\"date\": Tue, 20 Apr 2021 02:07:55 GMT\n\"content-type\": application/json\n\"content-digest\": sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:\n\"@method\": {method}\n\"@request-target\": {request_target}\n\"@signature-params\": (\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754409493;expires=1754409793\n"
         );
         let mut signature_result = vec![0; key_pair.public().modulus_len()];
         key_pair.sign(&RSA_PSS_SHA512, &rand, signature_str.as_bytes(), &mut signature_result).unwrap();
@@ -2260,7 +2268,7 @@ mod test {
         let public_key = fs::read("test_config/keys/public_key1.pem").unwrap();
 
         let mut keys: HashMap<String, SecurityKeyEnum> = HashMap::new();
-        keys.insert("key123".to_string(), SecurityKeyEnum::PublicKey { contents: public_key, algorithm: Algorithm::RsaPssSha512 });
+        keys.insert("key123".to_string(), SecurityKeyEnum::PublicKey { contents: public_key, algorithm: Algorithm::RsaPssSha512, key_id: "key123".to_string() });
         let service = HttpSignaturesService::new(None, None, Some(requirements), keys);
         let result = service.verify_signature(&headers, &derive_elements);
         assert!(result.is_ok());
@@ -2280,7 +2288,7 @@ mod test {
         let request_target = "/foo?param=value&pet=dog";
 
         let signature_str = format!(
-            "\"date\": Tue, 20 Apr 2021 02:07:55 GMT\n\"content-type\": application/json\n\"content-digest\": sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:\n\"@method\": {method}\n\"@request-target\": {request_target}\n\"@signature-params\": (\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-v1_5-sha256\";keyid=\"key123\";created=1754409493;expires=1754409793"
+            "\"date\": Tue, 20 Apr 2021 02:07:55 GMT\n\"content-type\": application/json\n\"content-digest\": sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:\n\"@method\": {method}\n\"@request-target\": {request_target}\n\"@signature-params\": (\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-v1_5-sha256\";keyid=\"key123\";created=1754409493;expires=1754409793\n"
         );
         let mut signature_result = vec![0; key_pair.public().modulus_len()];
         key_pair.sign(&RSA_PKCS1_SHA256, &rand, signature_str.as_bytes(), &mut signature_result).unwrap();
@@ -2299,7 +2307,7 @@ mod test {
         let public_key = fs::read("test_config/keys/public_key2.pem").unwrap();
 
         let mut keys: HashMap<String, SecurityKeyEnum> = HashMap::new();
-        keys.insert("key123".to_string(), SecurityKeyEnum::PublicKey { contents: public_key, algorithm: Algorithm::RsaPkcs1Sha256 });
+        keys.insert("key123".to_string(), SecurityKeyEnum::PublicKey { contents: public_key, algorithm: Algorithm::RsaPkcs1Sha256, key_id: "key123".to_string() });
         let service = HttpSignaturesService::new(None, None, Some(requirements), keys);
         let result = service.verify_signature(&headers, &derive_elements);
         assert!(result.is_ok());
@@ -2319,7 +2327,7 @@ mod test {
 
         let signature_str = format!(
             "\"date\": Tue, 20 Apr 2021 02:07:55 GMT\n\"content-type\": application/json\n\"content-digest\": sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:\n\"@method\": {method}\n\"@request-target\": {request_target}\n\"@signature-params\": {}",
-            "(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"ecdsa-p256-sha256\";keyid=\"key123\";created=1754409493;expires=1754409793"
+            "(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"ecdsa-p256-sha256\";keyid=\"key123\";created=1754409493;expires=1754409793\n"
         );
         let signature = STANDARD.encode(key_pair.sign(&rand, signature_str.as_bytes()).unwrap());
 
@@ -2336,7 +2344,7 @@ mod test {
         let public_key = fs::read("test_config/keys/public_key5.pem").unwrap();
 
         let mut keys: HashMap<String, SecurityKeyEnum> = HashMap::new();
-        keys.insert("key123".to_string(), SecurityKeyEnum::PublicKey { contents: public_key, algorithm: Algorithm::EcdsaP256Sha256 });
+        keys.insert("key123".to_string(), SecurityKeyEnum::PublicKey { contents: public_key, algorithm: Algorithm::EcdsaP256Sha256, key_id: "key123".to_string() });
         let service = HttpSignaturesService::new(None, None, Some(requirements), keys);
         let result = service.verify_signature(&headers, &derive_elements);
         assert!(result.is_ok());
@@ -2356,7 +2364,7 @@ mod test {
 
         let signature_str = format!(
             "\"date\": Tue, 20 Apr 2021 02:07:55 GMT\n\"content-type\": application/json\n\"content-digest\": sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:\n\"@method\": {method}\n\"@request-target\": {request_target}\n\"@signature-params\": {}",
-            "(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"ecdsa-p384-sha384\";keyid=\"key123\";created=1754409493;expires=1754409793"
+            "(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"ecdsa-p384-sha384\";keyid=\"key123\";created=1754409493;expires=1754409793\n"
         );
         let signature = STANDARD.encode(key_pair.sign(&rand, signature_str.as_bytes()).unwrap());
 
@@ -2373,7 +2381,7 @@ mod test {
         let public_key = fs::read("test_config/keys/public_key6.pem").unwrap();
 
         let mut keys: HashMap<String, SecurityKeyEnum> = HashMap::new();
-        keys.insert("key123".to_string(), SecurityKeyEnum::PublicKey { contents: public_key, algorithm: Algorithm::EcdsaP384Sha384 });
+        keys.insert("key123".to_string(), SecurityKeyEnum::PublicKey { contents: public_key, algorithm: Algorithm::EcdsaP384Sha384, key_id: "key123".to_string() });
         let service = HttpSignaturesService::new(None, None, Some(requirements), keys);
         let result = service.verify_signature(&headers, &derive_elements);
         assert!(result.is_ok());
@@ -2392,7 +2400,7 @@ mod test {
 
         let signature_str = format!(
             "\"date\": Tue, 20 Apr 2021 02:07:55 GMT\n\"content-type\": application/json\n\"content-digest\": sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:\n\"@method\": {method}\n\"@request-target\": {request_target}\n\"@signature-params\": {}",
-            "(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"ed25519\";keyid=\"key123\";created=1754409493;expires=1754409793"
+            "(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"ed25519\";keyid=\"key123\";created=1754409493;expires=1754409793\n"
         );
 
         let signature = STANDARD.encode(key_pair.sign(signature_str.as_bytes()));
@@ -2408,7 +2416,7 @@ mod test {
         headers.insert("date".to_string(), "Tue, 20 Apr 2021 02:07:55 GMT".to_string());
 
         let mut keys: HashMap<String, SecurityKeyEnum> = HashMap::new();
-        keys.insert("key123".to_string(), SecurityKeyEnum::PublicKey { contents: fs::read("test_config/keys/public_key4.pem").unwrap(), algorithm: Algorithm::Ed25519 });
+        keys.insert("key123".to_string(), SecurityKeyEnum::PublicKey { contents: fs::read("test_config/keys/public_key4.pem").unwrap(), algorithm: Algorithm::Ed25519, key_id: "key123".to_string() });
         let service = HttpSignaturesService::new(None, None, Some(requirements), keys);
         let result = service.verify_signature(&headers, &derive_elements);
         assert!(result.is_ok());
@@ -2424,7 +2432,7 @@ mod test {
         let request_target = "/foo?param=value&pet=dog";
 
         let signature_str = format!(
-            "\"date\": Tue, 20 Apr 2021 02:07:55 GMT\n\"content-type\": application/json\n\"content-digest\": sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:\n\"@method\": {method}\n\"@request-target\": {request_target}\n\"@signature-params\": (\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"hmac-sha256\";keyid=\"key123\";created=1754409493;expires=1754409793"
+            "\"date\": Tue, 20 Apr 2021 02:07:55 GMT\n\"content-type\": application/json\n\"content-digest\": sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:\n\"@method\": {method}\n\"@request-target\": {request_target}\n\"@signature-params\": (\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"hmac-sha256\";keyid=\"key123\";created=1754409493;expires=1754409793\n"
         );
 
         let signature = STANDARD.encode(ring::hmac::sign(&ring::hmac::Key::new(ring::hmac::HMAC_SHA256, b"TestHMACKey"), signature_str.as_bytes()));
@@ -2440,7 +2448,7 @@ mod test {
         headers.insert("date".to_string(), "Tue, 20 Apr 2021 02:07:55 GMT".to_string());
 
         let mut keys: HashMap<String, SecurityKeyEnum> = HashMap::new();
-        keys.insert("key123".to_string(), SecurityKeyEnum::SharedSecret { contents: "TestHMACKey".to_string(), algorithm: Algorithm::HmacSha256 });
+        keys.insert("key123".to_string(), SecurityKeyEnum::SharedSecret { contents: "TestHMACKey".to_string(), algorithm: Algorithm::HmacSha256, key_id: "key123".to_string() });
         let service = HttpSignaturesService::new(None, None, Some(requirements), keys);
         let result = service.verify_signature(&headers, &derive_elements);
         assert!(result.is_ok());
@@ -2452,7 +2460,7 @@ mod test {
 
         let requirements: HashSet<VerificationRequirement> = HashSet::new();
 
-        let signature_str = "\"date\": Tue, 20 Apr 2021 02:07:55 GMT\n\"content-type\": application/json\n\"content-digest\": sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:\n\"@status\": 200\n\"@signature-params\": (\"date\" \"content-type\" \"content-digest\" \"@status\");alg=\"hmac-sha256\";keyid=\"key123\";created=1754409493;expires=1754409793".to_string();
+        let signature_str = "\"date\": Tue, 20 Apr 2021 02:07:55 GMT\n\"content-type\": application/json\n\"content-digest\": sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:\n\"@status\": 200\n\"@signature-params\": (\"date\" \"content-type\" \"content-digest\" \"@status\");alg=\"hmac-sha256\";keyid=\"key123\";created=1754409493;expires=1754409793\n".to_string();
 
         let signature = STANDARD.encode(ring::hmac::sign(&ring::hmac::Key::new(ring::hmac::HMAC_SHA256, b"TestHMACKey"), signature_str.as_bytes()));
 
@@ -2467,7 +2475,7 @@ mod test {
         headers.insert("date".to_string(), "Tue, 20 Apr 2021 02:07:55 GMT".to_string());
 
         let mut keys: HashMap<String, SecurityKeyEnum> = HashMap::new();
-        keys.insert("key123".to_string(), SecurityKeyEnum::SharedSecret { contents: "TestHMACKey".to_string(), algorithm: Algorithm::HmacSha256 });
+        keys.insert("key123".to_string(), SecurityKeyEnum::SharedSecret { contents: "TestHMACKey".to_string(), algorithm: Algorithm::HmacSha256, key_id: "key123".to_string() });
         let service = HttpSignaturesService::new(None, None, Some(requirements), keys);
         let result = service.verify_signature(&headers, &derive_elements);
         assert!(result.is_ok());
@@ -2525,8 +2533,8 @@ mod test {
 
     #[tokio::test]
     async fn test_generate_signature_rsa_pss_sha512() {
-        let security_enum_private_key = SecurityKeyEnum::PrivateKey { contents: fs::read("test_config/keys/private_key1.pem").unwrap(), algorithm: Algorithm::RsaPssSha512, _passphrase: None };
-        let security_key_public_key = SecurityKeyEnum::PublicKey { contents: fs::read("test_config/keys/public_key1.pem").unwrap(), algorithm: Algorithm::RsaPssSha512 };
+        let security_enum_private_key = SecurityKeyEnum::PrivateKey { contents: fs::read("test_config/keys/private_key1.pem").unwrap(), algorithm: Algorithm::RsaPssSha512, passphrase: None, key_id: "key123".to_string() };
+        let security_key_public_key = SecurityKeyEnum::PublicKey { contents: fs::read("test_config/keys/public_key1.pem").unwrap(), algorithm: Algorithm::RsaPssSha512, key_id: "key123".to_string() };
         let signature = security_enum_private_key.generate_signature(b"test data").unwrap();
         let verify = security_key_public_key.verify_signature(&signature, b"test data");
         assert!(verify.is_ok());
@@ -2534,8 +2542,8 @@ mod test {
 
     #[tokio::test]
     async fn test_generate_signature_rsa_pkcs1_sha256() {
-        let security_enum_private_key = SecurityKeyEnum::PrivateKey { contents: fs::read("test_config/keys/private_key2.pem").unwrap(), algorithm: Algorithm::RsaPkcs1Sha256, _passphrase: None };
-        let security_key_public_key = SecurityKeyEnum::PublicKey { contents: fs::read("test_config/keys/public_key2.pem").unwrap(), algorithm: Algorithm::RsaPkcs1Sha256 };
+        let security_enum_private_key = SecurityKeyEnum::PrivateKey { contents: fs::read("test_config/keys/private_key2.pem").unwrap(), algorithm: Algorithm::RsaPkcs1Sha256, passphrase: None, key_id: "key123".to_string() };
+        let security_key_public_key = SecurityKeyEnum::PublicKey { contents: fs::read("test_config/keys/public_key2.pem").unwrap(), algorithm: Algorithm::RsaPkcs1Sha256, key_id: "key123".to_string() };
         let signature = security_enum_private_key.generate_signature(b"test data").unwrap();
         let verify = security_key_public_key.verify_signature(&signature, b"test data");
         assert!(verify.is_ok());
@@ -2543,8 +2551,8 @@ mod test {
 
     #[tokio::test]
     async fn test_generate_signature_ecdsa_p256_sha256() {
-        let security_enum_private_key = SecurityKeyEnum::PrivateKey { contents: fs::read("test_config/keys/private_key5.pem").unwrap(), algorithm: Algorithm::EcdsaP256Sha256, _passphrase: None };
-        let security_key_public_key = SecurityKeyEnum::PublicKey { contents: fs::read("test_config/keys/public_key5.pem").unwrap(), algorithm: Algorithm::EcdsaP256Sha256 };
+        let security_enum_private_key = SecurityKeyEnum::PrivateKey { contents: fs::read("test_config/keys/private_key5.pem").unwrap(), algorithm: Algorithm::EcdsaP256Sha256, passphrase: None, key_id: "key123".to_string() };
+        let security_key_public_key = SecurityKeyEnum::PublicKey { contents: fs::read("test_config/keys/public_key5.pem").unwrap(), algorithm: Algorithm::EcdsaP256Sha256, key_id: "key123".to_string() };
         let signature = security_enum_private_key.generate_signature(b"test data").unwrap();
         let verify = security_key_public_key.verify_signature(&signature, b"test data");
         assert!(verify.is_ok());
@@ -2552,8 +2560,8 @@ mod test {
 
     #[tokio::test]
     async fn test_generate_signature_ecdsa_p384_sha384() {
-        let security_enum_private_key = SecurityKeyEnum::PrivateKey { contents: fs::read("test_config/keys/private_key6.pem").unwrap(), algorithm: Algorithm::EcdsaP384Sha384, _passphrase: None };
-        let security_key_public_key = SecurityKeyEnum::PublicKey { contents: fs::read("test_config/keys/public_key6.pem").unwrap(), algorithm: Algorithm::EcdsaP384Sha384 };
+        let security_enum_private_key = SecurityKeyEnum::PrivateKey { contents: fs::read("test_config/keys/private_key6.pem").unwrap(), algorithm: Algorithm::EcdsaP384Sha384, passphrase: None, key_id: "key123".to_string() };
+        let security_key_public_key = SecurityKeyEnum::PublicKey { contents: fs::read("test_config/keys/public_key6.pem").unwrap(), algorithm: Algorithm::EcdsaP384Sha384, key_id: "key123".to_string() };
         let signature = security_enum_private_key.generate_signature(b"test data").unwrap();
         let verify = security_key_public_key.verify_signature(&signature, b"test data");
         assert!(verify.is_ok());
@@ -2561,8 +2569,8 @@ mod test {
 
     #[tokio::test]
     async fn test_generate_signature_ed25519() {
-        let security_enum_private_key = SecurityKeyEnum::PrivateKey { contents: fs::read("test_config/keys/private_key4.pem").unwrap(), algorithm: Algorithm::Ed25519, _passphrase: None };
-        let security_key_public_key = SecurityKeyEnum::PublicKey { contents: fs::read("test_config/keys/public_key4.pem").unwrap(), algorithm: Algorithm::Ed25519 };
+        let security_enum_private_key = SecurityKeyEnum::PrivateKey { contents: fs::read("test_config/keys/private_key4.pem").unwrap(), algorithm: Algorithm::Ed25519, passphrase: None, key_id: "key123".to_string() };
+        let security_key_public_key = SecurityKeyEnum::PublicKey { contents: fs::read("test_config/keys/public_key4.pem").unwrap(), algorithm: Algorithm::Ed25519, key_id: "key123".to_string() };
         let signature = security_enum_private_key.generate_signature(b"test data").unwrap();
         let verify = security_key_public_key.verify_signature(&signature, b"test data");
         assert!(verify.is_ok());
@@ -2570,8 +2578,8 @@ mod test {
 
     #[tokio::test]
     async fn test_generate_signature_hmac_sha256() {
-        let security_enum_private_key = SecurityKeyEnum::SharedSecret { contents: "Test secret".to_string(), algorithm: Algorithm::HmacSha256 };
-        let security_key_public_key = SecurityKeyEnum::SharedSecret { contents: "Test secret".to_string(), algorithm: Algorithm::HmacSha256 };
+        let security_enum_private_key = SecurityKeyEnum::SharedSecret { contents: "Test secret".to_string(), algorithm: Algorithm::HmacSha256, key_id: "key123".to_string() };
+        let security_key_public_key = SecurityKeyEnum::SharedSecret { contents: "Test secret".to_string(), algorithm: Algorithm::HmacSha256, key_id: "key123".to_string() };
         let signature = security_enum_private_key.generate_signature(b"test data").unwrap();
         let verify = security_key_public_key.verify_signature(&signature, b"test data");
         assert!(verify.is_ok());
@@ -2727,9 +2735,9 @@ mod test {
 
     #[tokio::test]
     async fn test_generate_verify_rsa_pss_sha512_response() {
-        let generating_secret = SecurityKeyEnum::PrivateKey { contents: fs::read("test_config/keys/private_key1.pem").unwrap(), algorithm: Algorithm::RsaPssSha512, _passphrase: None };
+        let generating_secret = SecurityKeyEnum::PrivateKey { contents: fs::read("test_config/keys/private_key1.pem").unwrap(), algorithm: Algorithm::RsaPssSha512, passphrase: None, key_id: "key123".to_string() };
 
-        let verifying_secret = SecurityKeyEnum::PublicKey { contents: fs::read("test_config/keys/public_key1.pem").unwrap(), algorithm: Algorithm::RsaPssSha512 };
+        let verifying_secret = SecurityKeyEnum::PublicKey { contents: fs::read("test_config/keys/public_key1.pem").unwrap(), algorithm: Algorithm::RsaPssSha512, key_id: "key123".to_string() };
 
         let verify_requirements: HashSet<VerificationRequirement> = vec![
             VerificationRequirement::HeaderRequired { name: "date".to_string() },
@@ -2755,7 +2763,7 @@ mod test {
             ("content-digest".to_string(), "sha256=:abcdef1234567890:".to_string()),
         ].into_iter().collect();
         let derive_elements = DeriveInputElements::new(None, None, None, None, None, None, None, Some(200));
-        let signature = http_signatures_service.generate_response_signature(&headers, &derive_elements, "key123").unwrap().unwrap();
+        let signature = http_signatures_service.generate_response_signature(&headers, &derive_elements).unwrap().unwrap();
         headers.insert("signature".to_string(), signature.0);
         headers.insert("signature-input".to_string(), signature.1);
         http_signatures_service.verify_signature(&headers, &derive_elements).unwrap();

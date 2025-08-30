@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use clap::{Parser, command};
 use serde::{Deserialize, Serialize};
@@ -120,7 +120,7 @@ pub struct AppSecurity {
      * Path to the key files and shared secrets used for verifying HTTP signatures.
      * Key is the keyid.
      */
-    pub verification_secrets: HashMap<String, SecretType>,
+    pub verification_secrets: Vec<SecretType>,
     /**
      * Input security configuration.
      */
@@ -137,15 +137,18 @@ pub enum SecretType {
     /**
      * Private key file with the specified algorithm. Used for signing.
      */
-    PrivateKey { path: String,  algorithm: String, passphrase: Option<String> },
+    #[serde(rename_all = "camelCase")]
+    PrivateKey { path: String,  algorithm: String, passphrase: Option<String>, key_id: String },
     /**
      * Public key file.
      */
-    PublicKeyFile { path: String, algorithm: String },
+    #[serde(rename_all = "camelCase")]
+    PublicKeyFile { path: String, algorithm: String, key_id: String },
     /**
      * Shared secret for hmac.
      */
-    SharedSecret { secret: String, algorithm: String },
+    #[serde(rename_all = "camelCase")]
+    SharedSecret { secret: String, algorithm: String, key_id: String },
 }
 
 /**
@@ -195,11 +198,11 @@ mod test {
     #[test]
     fn test_config_serialization_http_signatures() {
         let http_signatures = AppSecurity {
-            verification_secrets: HashMap::from([
-                ("key1".to_string(), SecretType::PublicKeyFile { path: "./test_config/public_keys/public_key1.pem".to_string(), algorithm: "rsa-v1_5-sha256".to_string() }),
-                ("key2".to_string(), SecretType::PublicKeyFile { path: "./test_config/public_keys/public_key2.pem".to_string(), algorithm: "rsa-pss-sha512".to_string() }),
-                ("key3".to_string(), SecretType::SharedSecret { secret: "test".to_string(), algorithm: "hmac-sha256".to_string() }),
-            ]),
+            verification_secrets: vec![
+                SecretType::PublicKeyFile { path: "./test_config/public_keys/public_key1.pem".to_string(), algorithm: "rsa-v1_5-sha256".to_string(), key_id: "key1".to_string() },
+                SecretType::PublicKeyFile { path: "./test_config/public_keys/public_key2.pem".to_string(), algorithm: "rsa-pss-sha512".to_string(), key_id: "key2".to_string() },
+                SecretType::SharedSecret { secret: "test".to_string(), algorithm: "hmac-sha256".to_string(), key_id: "key3".to_string() },
+            ],
             incoming_verification_requirements: Some(HashSet::from([
                 VerificationRequirement::HeaderRequired { name: "x-request-ID".to_string() },
                 VerificationRequirement::HeaderRequired { name: "x-fd-userid".to_string() },
@@ -217,7 +220,7 @@ mod test {
                 GenerationRequirement::GenerateExpires { expires_secs: 60 },
                 GenerationRequirement::DerivedRequired { name: "@method".to_string() },
             ])),
-            generating_secret: Some(SecretType::PrivateKey { path: "./test_config/private_keys/private_key.pem".to_string(), algorithm: "rsa-pss-sha512".to_string(), passphrase: None }),
+            generating_secret: Some(SecretType::PrivateKey { path: "./test_config/private_keys/private_key.pem".to_string(), algorithm: "rsa-pss-sha512".to_string(), passphrase: None, key_id: "key4".to_string() }),
         };
 
         let config = Config {
@@ -249,10 +252,10 @@ mod test {
         assert_eq!(config.server.workers, deserialized.server.workers);
         assert_eq!(config.server.http_port, deserialized.server.http_port);
         assert!(deserialized.server.https_config.is_none());
-        assert_eq!(deserialized.security.verification_secrets.get("key1").unwrap(), &SecretType::PublicKeyFile { path: "./test_config/public_keys/public_key1.pem".to_string(), algorithm: "rsa-v1_5-sha256".to_string() });
-        assert_eq!(deserialized.security.verification_secrets.get("key2").unwrap(), &SecretType::PublicKeyFile { path: "./test_config/public_keys/public_key2.pem".to_string(), algorithm: "rsa-pss-sha512".to_string() });
-        assert_eq!(deserialized.security.verification_secrets.get("key3").unwrap(), &SecretType::SharedSecret { secret: "test".to_string(), algorithm: "hmac-sha256".to_string() });
-        assert_eq!(deserialized.security.generating_secret, Some(SecretType::PrivateKey { path: "./test_config/private_keys/private_key.pem".to_string(), algorithm: "rsa-pss-sha512".to_string(), passphrase: None }));
+        assert_eq!(deserialized.security.verification_secrets.first().unwrap(), &SecretType::PublicKeyFile { path: "./test_config/public_keys/public_key1.pem".to_string(), algorithm: "rsa-v1_5-sha256".to_string(), key_id: "key1".to_string() });
+        assert_eq!(deserialized.security.verification_secrets.get(1).unwrap(), &SecretType::PublicKeyFile { path: "./test_config/public_keys/public_key2.pem".to_string(), algorithm: "rsa-pss-sha512".to_string(), key_id: "key2".to_string() });
+        assert_eq!(deserialized.security.verification_secrets.get(2).unwrap(), &SecretType::SharedSecret { secret: "test".to_string(), algorithm: "hmac-sha256".to_string(), key_id: "key3".to_string() });
+        assert_eq!(deserialized.security.generating_secret, Some(SecretType::PrivateKey { path: "./test_config/private_keys/private_key.pem".to_string(), algorithm: "rsa-pss-sha512".to_string(), passphrase: None, key_id: "key4".to_string() }));
         assert_eq!(deserialized.security.response_generation_requirements, Some(HashSet::from([
             GenerationRequirement::HeaderRequiredIfIncluded { name: "x-request-ID".to_string() },
             GenerationRequirement::GenerateCreated,

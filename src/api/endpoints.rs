@@ -1,9 +1,9 @@
 use actix_web::{
-    delete, http::header::{HeaderName, HeaderValue}, post, put, web::{self, Bytes, Path}, HttpRequest, HttpResponse
+    delete, http::{header::{HeaderName, HeaderValue}}, post, put, web::{self, Bytes, Path}, HttpRequest, HttpResponse
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use sha2::{Digest, Sha256, Sha384, Sha512};
-use tracing::{error, info, instrument, Instrument};
+use tracing::{debug, error, info, instrument, Instrument, warn};
 
 use crate::{
     api::{
@@ -23,13 +23,21 @@ use crate::{
 #[instrument(level = "info", skip(http_request, app_state, payload), fields(service = "listStatistics", trace_id = get_trace_id(&http_request), result))]
 #[post("/api/services/v1_0/statistics:list")]
 pub async fn list_statistics(http_request: HttpRequest, payload: web::Payload, request_body: web::Json<StatisticsListRequest>, pagination: web::Query<PaginationQuery>, app_state: web::Data<AppState>,) -> HttpResponse {
-    let _ = match get_payload_and_verify(&http_request, payload, &app_state).await {
+    let _ = match get_payload_and_verify(&http_request, payload, &app_state).instrument(tracing::Span::current()).await {
         Ok(payload) => payload,
-        Err(err) => return err,
+        Err(err) => return add_signature_headers(HttpResponse::from_error(err), &app_state),
     };
-    let http_response: HttpResponse = do_list_statistics(&pagination, &app_state).await.unwrap_or_else(|err| {
-        HttpResponse::from_error(err)
-    });
+    let statistics_list_response = match do_list_statistics(&pagination, &app_state).instrument(tracing::Span::current()).await {
+        Ok(response) => response,
+        Err(err) => {
+            return add_signature_headers(HttpResponse::from_error(err), &app_state);
+        }
+    };
+    let response = match serde_json::to_vec_pretty(&statistics_list_response) {
+        Ok(response) => response,
+        Err(err) => return add_signature_headers(HttpResponse::from_error(err), &app_state),
+    };
+    let http_response: HttpResponse = HttpResponse::Ok().append_header(("Content-Digest", format!("sha-512=:{}:", generate_digest(&response)))).body(response);
     add_signature_headers(http_response, &app_state)
 }
 
@@ -39,31 +47,36 @@ pub async fn list_statistics(http_request: HttpRequest, payload: web::Payload, r
 #[instrument(level = "info", skip(http_request, app_state, payload), fields(service = "addStatistics", trace_id = get_trace_id(&http_request), result))]
 #[post("/api/services/v1_0/statistics")]
 pub async fn add_statistic(http_request: HttpRequest, payload: web::Payload, app_state: web::Data<AppState>) -> HttpResponse {
-    let payload = match get_payload_and_verify(&http_request, payload, &app_state).await {
+    let payload = match get_payload_and_verify(&http_request, payload, &app_state).instrument(tracing::Span::current()).await {
         Ok(payload) => payload,
-        Err(err) => return err,
+        Err(err) => return add_signature_headers(HttpResponse::from_error(err), &app_state)
     };
-    let request_body = match convert_payload_body(&payload).await {
+    let request_body = match convert_payload_body(&payload).instrument(tracing::Span::current()).await {
         Ok(body) => body,
         Err(err_response) => return HttpResponse::from_error(err_response),
     };
-    let http_response: HttpResponse = do_add_statistics(http_request, request_body, app_state.clone()).await.unwrap_or_else(|err| {
-        HttpResponse::from_error(err)
-    });
-    add_signature_headers(http_response, &app_state)
+    match do_add_statistics(http_request, request_body, app_state.clone()).instrument(tracing::Span::current()).await {
+        Ok(_) => (),
+        Err(err) => return add_signature_headers(HttpResponse::from_error(err), &app_state),
+    };
+    add_signature_headers(HttpResponse::Created().finish(), &app_state)
 }
 
+/**
+ * Handles the deletion of a statistics type.
+ */
 #[instrument(level = "info", skip(http_request, app_state, payload), fields(service = "deleteStatistics", trace_id = get_trace_id(&http_request), result))]
 #[delete("/api/services/v1_0/statistics/{statisticsId}")]
 pub async fn delete_statistics(path: Path<i64>, payload: web::Payload, http_request: HttpRequest, app_state: web::Data<AppState>) -> HttpResponse {
-    let _ = match get_payload_and_verify(&http_request, payload, &app_state).await {
+    let _ = match get_payload_and_verify(&http_request, payload, &app_state).instrument(tracing::Span::current()).await {
         Ok(payload) => payload,
-        Err(err) => return err,
+        Err(err) => return add_signature_headers(HttpResponse::from_error(err), &app_state),
     };
-    let http_response: HttpResponse = do_delete_statistics(&path, &app_state).await.unwrap_or_else(|err| {
-        HttpResponse::from_error(err)
-    });
-    add_signature_headers(http_response, &app_state)
+    match do_delete_statistics(&path, &app_state).instrument(tracing::Span::current()).await {
+        Ok(_) => (),
+        Err(err) => return add_signature_headers(HttpResponse::from_error(err), &app_state),
+    };
+    add_signature_headers(HttpResponse::NoContent().finish(), &app_state)
 }
 
 /**
@@ -72,13 +85,21 @@ pub async fn delete_statistics(path: Path<i64>, payload: web::Payload, http_requ
 #[instrument(level = "info", skip(http_request, app_state, payload), fields(service = "listMunicipalities", trace_id = get_trace_id(&http_request), result))]
 #[post("/api/services/v1_0/municipalities:list")]
 pub async fn list_municipalities(pagination: web::Query<PaginationQuery>, payload: web::Payload, http_request: HttpRequest, app_state: web::Data<AppState>,) -> HttpResponse {
-    let _ = match get_payload_and_verify(&http_request, payload, &app_state).await {
+    let _ = match get_payload_and_verify(&http_request, payload, &app_state).instrument(tracing::Span::current()).await {
         Ok(payload) => payload,
-        Err(err) => return err,
+        Err(err) => return add_signature_headers(HttpResponse::from_error(err), &app_state),
     };
-    let http_response: HttpResponse = do_list_municipalities(&pagination, &app_state).await.unwrap_or_else(|err| {
-        HttpResponse::from_error(err)
-    });
+    let values_list_response = match do_list_municipalities(&pagination, &app_state).instrument(tracing::Span::current()).await {
+        Ok(response) => response,
+        Err(err) => {
+            return add_signature_headers(HttpResponse::from_error(err), &app_state);
+        }
+    };
+    let response = match serde_json::to_vec_pretty(&values_list_response) {
+        Ok(response) => response,
+        Err(err) => return add_signature_headers(HttpResponse::from_error(err), &app_state),
+    };
+    let http_response: HttpResponse = HttpResponse::Ok().append_header(("Content-Digest", format!("sha-512=:{}:", generate_digest(&response)))).body(response);
     add_signature_headers(http_response, &app_state)
 }
 
@@ -88,18 +109,19 @@ pub async fn list_municipalities(pagination: web::Query<PaginationQuery>, payloa
 #[instrument(level = "info", skip(http_request, app_state, payload), fields(service = "addMunicipality", trace_id = get_trace_id(&http_request), result))]
 #[post("/api/services/v1_0/municipalities")]
 pub async fn add_municipality(http_request: HttpRequest, payload: web::Payload, app_state: web::Data<AppState>) -> HttpResponse {
-    let payload: Bytes = match get_payload_and_verify(&http_request, payload, &app_state).await {
+    let payload: Bytes = match get_payload_and_verify(&http_request, payload, &app_state).instrument(tracing::Span::current()).await {
         Ok(payload) => payload,
-        Err(err) => return err,
+        Err(err) => return add_signature_headers(HttpResponse::from_error(err), &app_state),
     };
-    let request_body = match convert_payload_body(&payload).await {
+    let request_body = match convert_payload_body(&payload).instrument(tracing::Span::current()).await {
         Ok(body) => body,
-        Err(err_response) => return HttpResponse::from_error(err_response),
+        Err(err_response) => return add_signature_headers(HttpResponse::from_error(err_response), &app_state),
     };
-    let http_response: HttpResponse = do_add_municipality(&http_request, &request_body, &app_state).await.unwrap_or_else(|err| {
-        HttpResponse::from_error(err)
-    });
-    add_signature_headers(http_response, &app_state)
+    match do_add_municipality(&http_request, &request_body, &app_state).instrument(tracing::Span::current()).await {
+        Ok(_) => (),
+        Err(err) => return add_signature_headers(HttpResponse::from_error(err), &app_state),
+    };
+    add_signature_headers(HttpResponse::Created().finish(), &app_state)
 }
 
 /**
@@ -108,14 +130,15 @@ pub async fn add_municipality(http_request: HttpRequest, payload: web::Payload, 
 #[instrument(level = "info", skip(http_request, app_state, payload), fields(service = "deleteMunicipality", trace_id = get_trace_id(&http_request), result))]
 #[delete("/api/services/v1_0/municipalities/{municipalityId}")]
 pub async fn delete_municipality(path: Path<i64>, payload: web::Payload, http_request: HttpRequest, app_state: web::Data<AppState>) -> HttpResponse {
-    let _ = match get_payload_and_verify(&http_request, payload, &app_state).await {
+    let _ = match get_payload_and_verify(&http_request, payload, &app_state).instrument(tracing::Span::current()).await {
         Ok(payload) => payload,
-        Err(err) => return err,
+        Err(err) => return add_signature_headers(HttpResponse::from_error(err), &app_state),
     };
-    let http_response: HttpResponse = do_delete_municipality(&path, &app_state).await.unwrap_or_else(|err| {
-        HttpResponse::from_error(err)
-    });
-    add_signature_headers(http_response, &app_state)
+    match do_delete_municipality(&path, &app_state).instrument(tracing::Span::current()).await {
+        Ok(_) => (),
+        Err(err) => return add_signature_headers(HttpResponse::from_error(err), &app_state),
+    };
+    add_signature_headers(HttpResponse::NoContent().finish(), &app_state)
 }
 
 /**
@@ -124,17 +147,25 @@ pub async fn delete_municipality(path: Path<i64>, payload: web::Payload, http_re
 #[instrument(level = "info", skip(http_request, app_state, payload), fields(service = "listValues", trace_id = get_trace_id(&http_request), result))]
 #[post("/api/services/v1_0/values:list")]
 pub async fn list_values(http_request: HttpRequest, payload: web::Payload, pagination: web::Query<PaginationQuery>, app_state: web::Data<AppState>,) -> HttpResponse {
-    let payload = match get_payload_and_verify(&http_request, payload, &app_state).await {
+    let payload = match get_payload_and_verify(&http_request, payload, &app_state).instrument(tracing::Span::current()).await {
         Ok(payload) => payload,
-        Err(err) => return err,
+        Err(err) => return add_signature_headers(HttpResponse::from_error(err), &app_state),
     };
-    let request_body = match convert_payload_body(&payload).await {
+    let request_body = match convert_payload_body(&payload).instrument(tracing::Span::current()).await {
         Ok(body) => body,
-        Err(err_response) => return HttpResponse::from_error(err_response),
+        Err(err_response) => return add_signature_headers(HttpResponse::from_error(err_response), &app_state),
     };
-    let http_response: HttpResponse = do_list_values(&request_body, &pagination, &app_state).await.unwrap_or_else(|err| {
-        HttpResponse::from_error(err)
-    });
+    let values_list_response: ValuesListResponse = match do_list_values(&request_body, &pagination, &app_state).instrument(tracing::Span::current()).await {
+        Ok(response) => response,
+        Err(err) => {
+            return add_signature_headers(HttpResponse::from_error(err), &app_state);
+        }
+    };
+    let response = match serde_json::to_vec_pretty(&values_list_response) {
+        Ok(response) => response,
+        Err(err) => return add_signature_headers(HttpResponse::from_error(err), &app_state),
+    };
+    let http_response: HttpResponse = HttpResponse::Ok().append_header(("Content-Digest", format!("sha-512=:{}:", generate_digest(&response)))).body(response);
     add_signature_headers(http_response, &app_state)
 }
 
@@ -146,16 +177,17 @@ pub async fn list_values(http_request: HttpRequest, payload: web::Payload, pagin
 pub async fn add_value(http_request: HttpRequest, payload: web::Payload, app_state: web::Data<AppState>) -> HttpResponse {
     let payload = match get_payload_and_verify(&http_request, payload, &app_state).await {
         Ok(payload) => payload,
-        Err(err) => return err,
+        Err(err) => return add_signature_headers(HttpResponse::from_error(err), &app_state),
     };
-    let request_body = match convert_payload_body(&payload).await {
+    let request_body = match convert_payload_body(&payload).instrument(tracing::Span::current()).await {
         Ok(body) => body,
-        Err(err_response) => return HttpResponse::from_error(err_response),
+        Err(err_response) => return add_signature_headers(HttpResponse::from_error(err_response), &app_state),
     };
-    let http_response: HttpResponse = do_add_value(&http_request, &request_body, &app_state).await.unwrap_or_else(|err| {
-        HttpResponse::from_error(err)
-    });
-    add_signature_headers(http_response, &app_state)
+    match do_add_value(&http_request, &request_body, &app_state).instrument(tracing::Span::current()).await {
+        Ok(_) => (),
+        Err(err) => return add_signature_headers(HttpResponse::from_error(err), &app_state),
+    };
+    add_signature_headers(HttpResponse::Created().finish(), &app_state)
 }
 
 /**
@@ -164,46 +196,54 @@ pub async fn add_value(http_request: HttpRequest, payload: web::Payload, app_sta
 #[instrument(level = "info", skip(http_request, app_state, payload), fields(service = "deleteValue", trace_id = get_trace_id(&http_request), result))]
 #[delete("/api/services/v1_0/values/{valueId}")]
 pub async fn delete_value(path: Path<i64>, payload: web::Payload, http_request: HttpRequest, app_state: web::Data<AppState>) -> HttpResponse {
-    let _ = match get_payload_and_verify(&http_request, payload, &app_state).await {
+    let _ = match get_payload_and_verify(&http_request, payload, &app_state).instrument(tracing::Span::current()).await {
         Ok(payload) => payload,
-        Err(err) => return err,
+        Err(err) => return add_signature_headers(HttpResponse::from_error(err), &app_state),
     };
-    let http_response: HttpResponse = do_delete_value(&path, &app_state).await.unwrap_or_else(|err| {
-        HttpResponse::from_error(err)
-    });
-    add_signature_headers(http_response, &app_state)
+    match do_delete_value(&path, &app_state).instrument(tracing::Span::current()).await {
+        Ok(_) => (),
+        Err(err) => return add_signature_headers(HttpResponse::from_error(err), &app_state),
+    };
+    add_signature_headers(HttpResponse::NoContent().finish(), &app_state)
 }
+
 /**
  * Endpoint to update values.
  */
 #[instrument(level = "info", skip(http_request, app_state, payload), fields(service = "updateValue", trace_id = get_trace_id(&http_request), result))]
 #[put("/api/services/v1_0/values/{valueId}")]
 pub async fn update_value(path: Path<i64>, http_request: HttpRequest, payload: web::Payload, app_state: web::Data<AppState>) -> HttpResponse {
-    let payload = match get_payload_and_verify(&http_request, payload, &app_state).await {
+    let payload = match get_payload_and_verify(&http_request, payload, &app_state).instrument(tracing::Span::current()).await {
         Ok(payload) => payload,
-        Err(err) => return err,
+        Err(err) => return add_signature_headers(HttpResponse::from_error(err), &app_state),
     };
-    let request_body = match convert_payload_body(&payload).await {
+    let request_body = match convert_payload_body(&payload).instrument(tracing::Span::current()).await {
         Ok(body) => body,
-        Err(err_response) => return HttpResponse::from_error(err_response),
+        Err(err_response) => return add_signature_headers(HttpResponse::from_error(err_response), &app_state),
     };
-    let http_response: HttpResponse = do_update_value(&path, &http_request, &request_body, &app_state).await.unwrap_or_else(|err| {
-        HttpResponse::from_error(err)
-    });
-    add_signature_headers(http_response, &app_state)
+    match do_update_value(&path, &http_request, &request_body, &app_state).instrument(tracing::Span::current()).await {
+        Ok(_) => (),
+        Err(err) => return add_signature_headers(HttpResponse::from_error(err), &app_state),
+    };
+    add_signature_headers(HttpResponse::Ok().finish(), &app_state)
 }
 
 /**--------------Request handler functions------------------ */
 /**
  * Endpoint to retrieve a list of statistics types.
+ *
+ * # Arguments
+ * `pagination` - The pagination query parameters.
+ * `app_state` - The application state containing shared services and configuration.
+ *
+ * # Returns
+ * `Result<StatisticsListResponse, ApplicationError>` - The HTTP response containing the list of statistics types or an error.
  */
-async fn do_list_statistics(pagination: &web::Query<PaginationQuery>, app_state: &web::Data<AppState>,) -> Result<HttpResponse, ApplicationError> {
+async fn do_list_statistics(pagination: &web::Query<PaginationQuery>, app_state: &web::Data<AppState>,) -> Result<StatisticsListResponse, ApplicationError> {
     let span = tracing::Span::current();
     let pagination_input = PaginationInput::from(pagination).validate()?;
     let output_values: StatisticsListOutputType = app_state.statistics_service.get_statistics_list(pagination_input).instrument(span).await?;
-    let response =
-        serde_json::to_vec_pretty(&StatisticsListResponse::from(output_values)).map_err(|_| ApplicationError::new(ErrorType::Application, "Failed to serialize statistics list".to_string()))?;
-    Ok(HttpResponse::Ok().append_header(("Content-Digest", format!("sha-512=:{}:", generate_digest(&response)))).body(response))
+    Ok(StatisticsListResponse::from(output_values))
 }
 
 
@@ -216,13 +256,13 @@ async fn do_list_statistics(pagination: &web::Query<PaginationQuery>, app_state:
  * `app_state` - The application state containing shared services and configuration.
  *
  * # Returns
- * `Result<HttpResponse, ApplicationError>` - The HTTP response indicating the result of the addition operation.
+ * `Result<(), ApplicationError>` - The HTTP response indicating the result of the addition operation.
  */
-async fn do_add_statistics(http_request: HttpRequest, request_body: web::Json<StatisticsAddRequest>, app_state: web::Data<AppState>) -> Result<HttpResponse, ApplicationError> {
+async fn do_add_statistics(http_request: HttpRequest, request_body: web::Json<StatisticsAddRequest>, app_state: web::Data<AppState>) -> Result<(), ApplicationError> {
     let span = tracing::Span::current();
     let statistics_add_input = StatisticAddInputType::from((request_body, get_userid(&http_request)?)).validate()?;
     app_state.statistics_service.add_statistic(statistics_add_input).instrument(span).await?;
-    Ok(HttpResponse::Created().finish())
+    Ok(())
 }
 
 /**
@@ -234,13 +274,13 @@ async fn do_add_statistics(http_request: HttpRequest, request_body: web::Json<St
  * `app_state` - The application state containing shared services and configuration.
  *
  * # Returns
- * `Result<HttpResponse, ApplicationError>` - The HTTP response indicating the result of the deletion operation.
+ * `Result<(), ApplicationError>` - The application error indicating the result of the deletion operation.
  */
-async fn do_delete_statistics(path: &Path<i64>, app_state: &web::Data<AppState>) -> Result<HttpResponse, ApplicationError> {
+async fn do_delete_statistics(path: &Path<i64>, app_state: &web::Data<AppState>) -> Result<(), ApplicationError> {
     let span = tracing::Span::current();
     let statistics_id = path.as_ref();
     app_state.statistics_service.delete_statistics(*statistics_id).instrument(span).await?;
-    Ok(HttpResponse::NoContent().finish())
+    Ok(())
 }
 
 /**
@@ -251,15 +291,13 @@ async fn do_delete_statistics(path: &Path<i64>, app_state: &web::Data<AppState>)
  * `app_state` - The application state containing shared services and configuration.
  * 
  * # Returns
- * `Result<HttpResponse, ApplicationError>` - The HTTP response containing the list of municipalities or an error.
+ * `Result<MunicipalityListResponse, ApplicationError>` - The HTTP response containing the list of municipalities or an error.
  */
-async fn do_list_municipalities(pagination: &web::Query<PaginationQuery>, app_state: &web::Data<AppState>) -> Result<HttpResponse, ApplicationError> {
+async fn do_list_municipalities(pagination: &web::Query<PaginationQuery>, app_state: &web::Data<AppState>) -> Result<MunicipalityListResponse, ApplicationError> {
     let span = tracing::Span::current();
     let pagination_input = PaginationInput::from(pagination).validate()?;
     let output_values = app_state.statistics_service.get_municipality_list(pagination_input).instrument(span).await?;
-    let response =
-        serde_json::to_vec_pretty(&MunicipalityListResponse::from(output_values)).map_err(|_| ApplicationError::new(ErrorType::Application, "Failed to serialize statistics list".to_string()))?;
-    Ok(HttpResponse::Ok().append_header(("Content-Digest", format!("sha-512=:{}:", generate_digest(&response)))).body(response))
+    Ok(MunicipalityListResponse::from(output_values))
 }
 
 /**
@@ -271,13 +309,13 @@ async fn do_list_municipalities(pagination: &web::Query<PaginationQuery>, app_st
  * `app_state` - The application state containing shared services and configuration.
  *
  * # Returns
- * `Result<HttpResponse, ApplicationError>` - The HTTP response indicating the result of the addition operation.
+ * `Result<(), ApplicationError>` - The application error indicating the result of the addition operation.
  */
-async fn do_add_municipality(http_request: &HttpRequest, request_body: &web::Json<MunicipalityAddRequest>, app_state: &web::Data<AppState>) -> Result<HttpResponse, ApplicationError> {
+async fn do_add_municipality(http_request: &HttpRequest, request_body: &web::Json<MunicipalityAddRequest>, app_state: &web::Data<AppState>) -> Result<(), ApplicationError> {
     let span = tracing::Span::current();
     let municipality_add_input = MunicipalityAddInputType::from((request_body, get_userid(http_request)?)).validate()?;
     app_state.statistics_service.add_municipality(municipality_add_input).instrument(span).await?;
-    Ok(HttpResponse::Created().finish())
+    Ok(())
 }
 
 /**
@@ -288,13 +326,13 @@ async fn do_add_municipality(http_request: &HttpRequest, request_body: &web::Jso
  * `app_state` - The application state containing shared services and configuration.
  *
  * # Returns
- * `Result<HttpResponse, ApplicationError>` - The HTTP response indicating the result of the deletion operation.
+ * `Result<(), ApplicationError>` - The application error indicating the result of the deletion operation.
  */
- async fn do_delete_municipality(path: &Path<i64>, app_state: &web::Data<AppState>) -> Result<HttpResponse, ApplicationError> {
+ async fn do_delete_municipality(path: &Path<i64>, app_state: &web::Data<AppState>) -> Result<(), ApplicationError> {
     let span = tracing::Span::current();
     let municipality_id = path.as_ref();
     app_state.statistics_service.delete_municipality(*municipality_id).instrument(span).await?;
-    Ok(HttpResponse::NoContent().finish())
+    Ok(())
 }
 
 /**
@@ -307,15 +345,14 @@ async fn do_add_municipality(http_request: &HttpRequest, request_body: &web::Jso
  * `app_state` - The application state containing shared services and configuration.
  *
  * # Returns
- * `Result<HttpResponse, ApplicationError>` - The HTTP response containing the list of values or an error.
+ * `Result<ValuesListResponse, ApplicationError>` - The HTTP response containing the list of values or an error.
  */
-async fn do_list_values(request_body: &web::Json<ValuesListRequest>, pagination: &web::Query<PaginationQuery>, app_state: &web::Data<AppState>,) -> Result<HttpResponse, ApplicationError> {
+async fn do_list_values(request_body: &web::Json<ValuesListRequest>, pagination: &web::Query<PaginationQuery>, app_state: &web::Data<AppState>,) -> Result<ValuesListResponse, ApplicationError> {
     let span = tracing::Span::current();
     let pagination_input = PaginationInput::from(pagination).validate()?;
     let filter_params = ValuesListInputType::from(request_body).validate()?;
     let output_values = app_state.statistics_service.get_values_list(pagination_input, filter_params).instrument(span).await?;
-    let response = serde_json::to_vec_pretty(&ValuesListResponse::from(output_values)).map_err(|_| ApplicationError::new(ErrorType::Application, "Failed to serialize values list".to_string()))?;
-    Ok(HttpResponse::Ok().append_header(("Content-Digest", format!("sha-512=:{}:", generate_digest(&response)))).body(response))
+    Ok(ValuesListResponse::from(output_values))
 }
 
 /**
@@ -327,13 +364,13 @@ async fn do_list_values(request_body: &web::Json<ValuesListRequest>, pagination:
  * `app_state` - The application state containing shared services and configuration.
  *
  * # Returns
- * `Result<HttpResponse, ApplicationError>` - The HTTP response indicating the result of the addition operation.
+ * `Result<HttpResponse, ApplicationError>` - The application error indicating the result of the addition operation.
  */
-pub async fn do_add_value(http_request: &HttpRequest, request_body: &web::Json<ValuesAddUpdateRequest>, app_state: &web::Data<AppState>) -> Result<HttpResponse, ApplicationError> {
+pub async fn do_add_value(http_request: &HttpRequest, request_body: &web::Json<ValuesAddUpdateRequest>, app_state: &web::Data<AppState>) -> Result<(), ApplicationError> {
     let span = tracing::Span::current();
     let values_add_input = ValuesAddUpdateInputType::from((request_body, get_userid(http_request)?)).validate()?;
     app_state.statistics_service.add_value(values_add_input).instrument(span).await?;
-    Ok(HttpResponse::Created().finish())
+    Ok(())
 }
 
 /**
@@ -347,11 +384,11 @@ pub async fn do_add_value(http_request: &HttpRequest, request_body: &web::Json<V
  * # Returns
  * `Result<HttpResponse, ApplicationError>` - The HTTP response indicating the result of the deletion operation.
  */
-pub async fn do_delete_value(path: &Path<i64>, app_state: &web::Data<AppState>) -> Result<HttpResponse, ApplicationError> {
+pub async fn do_delete_value(path: &Path<i64>, app_state: &web::Data<AppState>) -> Result<(), ApplicationError> {
     let span = tracing::Span::current();
     let value_id = path.as_ref();
     app_state.statistics_service.delete_value(*value_id).instrument(span).await?;
-    Ok(HttpResponse::NoContent().finish())
+    Ok(())
 }
 
 /**
@@ -366,12 +403,12 @@ pub async fn do_delete_value(path: &Path<i64>, app_state: &web::Data<AppState>) 
  * # Returns
  * `Result<HttpResponse, ApplicationError>` - The HTTP response indicating the result of the update operation.
  */
-pub async fn do_update_value(path: &Path<i64>, http_request: &HttpRequest, request_body: &web::Json<ValuesAddUpdateRequest>, app_state: &web::Data<AppState>) -> Result<HttpResponse, ApplicationError> {
+pub async fn do_update_value(path: &Path<i64>, http_request: &HttpRequest, request_body: &web::Json<ValuesAddUpdateRequest>, app_state: &web::Data<AppState>) -> Result<(), ApplicationError> {
     let span = tracing::Span::current();
     let value_id = path.as_ref();
     let values_add_update_input = ValuesAddUpdateInputType::from((request_body, get_userid(http_request)?)).validate()?;
     app_state.statistics_service.update_value(*value_id, values_add_update_input).instrument(span).await?;
-    Ok(HttpResponse::Ok().finish())
+    Ok(())
 }
 
 /**--------------Support functions --------------------*/
@@ -405,7 +442,7 @@ fn get_userid(http_request: &HttpRequest) -> Result<String, ApplicationError> {
         .get("X-fd-Userid")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string())
-        .ok_or_else(|| ApplicationError::new(ErrorType::Validation, "User ID not found in request headers".to_string()))
+        .ok_or_else(|| ApplicationError::new(ErrorType::Validation, "User id not found in request headers".to_string()))
 }
 
 /**
@@ -429,6 +466,8 @@ fn add_signature_headers(
     if let Some((signature_header, signature_input_header)) = sig {
         http_response.headers_mut().insert(HeaderName::from_static("signature"), signature_header);
         http_response.headers_mut().insert(HeaderName::from_static("signature-input"), signature_input_header);
+    } else {
+        warn!("HTTPS signatures are not enabled or signature generation failed.");
     }
     http_response
 }
@@ -450,7 +489,7 @@ fn get_signature_headers(response: &HttpResponse, app_state: &web::Data<AppState
     let headers = convert_headers_to_lowercase(response.headers());
     let derive_elements = DeriveInputElements::from(response);
     let generated_signature = app_state.security_service.generate_response_signature(
-            &headers, &derive_elements, "key123");
+            &headers, &derive_elements);
     if let Ok(Some(signature)) = &generated_signature {
         let signature_header = HeaderValue::from_str(&signature.0).map_err(|err| {
             error!("Failed to create signature header: {err:?}");
@@ -475,11 +514,12 @@ fn get_signature_headers(response: &HttpResponse, app_state: &web::Data<AppState
  * # Returns
  * `Result<(), HttpResponse>` - Ok if the signature is valid, or an error response if verification fails.
  */
-fn verify_signature(http_request: &HttpRequest, app_state: &web::Data<AppState>) -> Result<(), HttpResponse> {
+fn verify_signature(http_request: &HttpRequest, app_state: &web::Data<AppState>) -> Result<(), ApplicationError> {
     app_state.security_service.verify_signature(&convert_headers_to_lowercase(http_request.headers()), &DeriveInputElements::from(http_request))
         .map_err(|err| {
             info!("Signature verification failed: {err}");
-            add_signature_headers(HttpResponse::from_error(ApplicationError::new(ErrorType::SignatureVerification, "Signature verification failed".to_string())), app_state)
+            // We do not return specific error details to the client.
+            ApplicationError::new(ErrorType::SignatureVerification, "Signature verification failed".to_string())
         })?;
     Ok(())
 }
@@ -492,14 +532,14 @@ fn verify_signature(http_request: &HttpRequest, app_state: &web::Data<AppState>)
  * `body`: The request body as a byte slice.
  *
  * # Returns
- * `Result<(), HttpResponse>` - Ok if the digest is valid, or an error response if verification fails.
+ * `Result<(), ApplicationError>` - Ok if the digest is valid, or an application error if verification fails.
  */
-fn verify_digest(http_request: &HttpRequest, body: &[u8]) -> Result<(), HttpResponse> {
+fn verify_digest(http_request: &HttpRequest, body: &[u8]) -> Result<(), ApplicationError> {
     if body.is_empty() && http_request.headers().get("Content-Digest").is_none() {
         return Ok(());
     }
-    let digest = http_request.headers().get("Content-Digest").and_then(|v| v.to_str().ok()).ok_or_else(|| HttpResponse::from_error(ApplicationError::new(crate::model::apperror::ErrorType::DigestVerification, "Missing Content-Digest header".to_string())))?;
-    let (algorithm, expected_digest) = digest.split_once('=').ok_or_else(|| HttpResponse::from_error(ApplicationError::new(crate::model::apperror::ErrorType::DigestVerification, "Invalid digest format".to_string())))?;
+    let digest = http_request.headers().get("Content-Digest").and_then(|v| v.to_str().ok()).ok_or_else(|| ApplicationError::new(crate::model::apperror::ErrorType::DigestVerification, "Missing Content-Digest header".to_string()))?;
+    let (algorithm, expected_digest) = digest.split_once('=').ok_or_else(|| ApplicationError::new(crate::model::apperror::ErrorType::DigestVerification, "Invalid digest format".to_string()))?;
     let expected_hash = str::replace(expected_digest, ":", "");
     let hash_result = match algorithm.to_uppercase().as_str() {
         "SHA-256" => Sha256::digest(body).to_vec(),
@@ -513,10 +553,14 @@ fn verify_digest(http_request: &HttpRequest, body: &[u8]) -> Result<(), HttpResp
             algorithm.update(body);
             algorithm.finalize().to_vec()
         }
-        _ => return Err(HttpResponse::from_error(ApplicationError::new(crate::model::apperror::ErrorType::Application, "Unsupported digest algorithm".to_string()))),
+        _ => {
+            info!("Unsupported digest algorithm: {algorithm}");
+            return Err(ApplicationError::new(crate::model::apperror::ErrorType::Application, "Unsupported digest algorithm".to_string()))
+        }
     };
     let result = STANDARD.encode(hash_result);
-    if result == expected_hash { Ok(()) } else { Err(HttpResponse::from_error(ApplicationError::new(crate::model::apperror::ErrorType::DigestVerification, "Digest verification failed".to_string()))) }
+    debug!("Calculated digest: {result}");
+    if result == expected_hash { Ok(()) } else { Err(ApplicationError::new(crate::model::apperror::ErrorType::DigestVerification, "Digest verification failed".to_string())) }
 }
 
 /**
@@ -544,24 +588,19 @@ async fn convert_payload_body<T>(payload: &Bytes) -> Result<web::Json<T>, Applic
  * `payload` - The request payload to verify.
  *
  * # Returns
- * `Result<Bytes, HttpResponse>` - The request payload if successful, or an error response if verification fails.
+ * `Result<Bytes, ApplicationError>` - The request payload if successful, or an application error if verification fails.
  */
-async fn get_payload_and_verify(http_request: &HttpRequest, payload: web::Payload, app_state: &actix_web::web::Data<AppState>) -> Result<Bytes, HttpResponse> {
+async fn get_payload_and_verify(http_request: &HttpRequest, payload: web::Payload, app_state: &actix_web::web::Data<AppState>) -> Result<Bytes, ApplicationError> {
     let payload: Bytes = match payload.to_bytes().await {
         Ok(bytes) => { 
-            verify_digest(http_request, &bytes).map_err(|err| {
-                add_signature_headers(err, app_state)
-            })?;
+            verify_digest(http_request, &bytes)?;
             bytes 
         },
-        Err(err_response) => return Err(HttpResponse::from_error(err_response)),
+        Err(err_response) => return Err(ApplicationError::new(ErrorType::Application, format!("Failed to read request body: {err_response}"))),
     };
-    verify_signature(http_request, app_state).map_err(|err| {
-        add_signature_headers(err, app_state)
-    })?;
+    verify_signature(http_request, app_state)?;
     Ok(payload)
 }
-
 
 #[cfg(test)]
 mod test {

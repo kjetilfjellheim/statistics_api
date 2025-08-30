@@ -27,39 +27,51 @@ responseGenerationRequirements = [
     "GenerateCreated",
 ]
 [security.generatingSecret]
-privateKey = { path = "./test_config/keys/private_key1.pem", algorithm = "rsa-pss-sha512" }
+privateKey = { path = "./test_config/keys/private_key1.pem", algorithm = "rsa-pss-sha512", keyId = "123456789" }
 
-[security.verificationSecrets.key1.publicKeyFile]
+[[security.verificationSecrets]]
+[security.verificationSecrets.publicKeyFile]
 path = "./test_config/keys/public_key1.pem"
 algorithm = "rsa-pss-sha512"
+keyId = "key1"
 
-[security.verificationSecrets.key2.publicKeyFile]
+[[security.verificationSecrets]]
+[security.verificationSecrets.publicKeyFile]
 path = "./test_config/keys/public_key2.pem"
 algorithm = "rsa-pss-sha512"
+keyId = "key2"
 
-[security.verificationSecrets.key3.sharedSecret]
+[[security.verificationSecrets]]
+[security.verificationSecrets.sharedSecret]
 secret = "test"
 algorithm = "hmac-sha256"
+keyId = "key3"
 
-[security.verificationSecrets.key4.publicKeyFile]
+[[security.verificationSecrets]]
+[security.verificationSecrets.publicKeyFile]
 path = "./test_config/keys/public_key4.pem"
 algorithm = "ecdsa-p256-sha256"
+keyId = "key4"
 
-[security.verificationSecrets.key5.publicKeyFile]
+[[security.verificationSecrets]]
+[security.verificationSecrets.publicKeyFile]
 path = "./test_config/keys/public_key5.pem"
 algorithm = "ecdsa-p384-sha384"
+keyId = "key5"
 
-[security.verificationSecrets.key6.publicKeyFile]
+[[security.verificationSecrets]]
+[security.verificationSecrets.publicKeyFile]
 path = "./test_config/keys/public_key6.pem"
 algorithm = "ed25519"
+keyId = "key6"
 
 [server]
 workers = 50
 httpPort = 8080
 
 [database.dbType.postgresql]
-connectionString = "postgres://postgres:1234@localhost:5432/statistics"
-maxConnections = 50
+connectionString = ""
+maxConnections = 10
 minConnections = 5
 acquireTimeout = 6000
 acquireSlowThreshold = 3000

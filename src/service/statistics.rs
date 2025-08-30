@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use sqlx::{Pool, Postgres};
-use tracing::{Instrument, instrument};
+use tracing::{info, instrument, Instrument};
 
 use crate::{
     dao::statistics::StatisticsDao,
@@ -76,6 +76,7 @@ impl StatisticsService {
         match self.statistics_dao.add_municipality(&mut transaction, municipality_add_input).instrument(span.clone()).await {
             Ok(()) => transaction.commit().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to commit transaction: {err}")))?,
             Err(err) => {
+                info!("Error occurred while adding municipality: {:?}", err);
                 transaction.rollback().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to rollback transaction: {err}")))?;
                 return Err(err);
             }
@@ -100,6 +101,7 @@ impl StatisticsService {
         match self.statistics_dao.delete_municipality(&mut transaction, municipality_id).instrument(span.clone()).await {
             Ok(()) => transaction.commit().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to commit transaction: {err}")))?,
             Err(err) => {
+                info!("Error occurred while deleting municipality: {:?}", err);
                 transaction.rollback().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to rollback transaction: {err}")))?;
                 return Err(err);
             }
@@ -141,6 +143,7 @@ impl StatisticsService {
         match self.statistics_dao.add_statistics(&mut transaction, statistics_add_input).instrument(span.clone()).await {
             Ok(()) => transaction.commit().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to commit transaction: {err}")))?,
             Err(err) => {
+                info!("Error occurred while adding statistic: {:?}", err);
                 transaction.rollback().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to rollback transaction: {err}")))?;
                 return Err(err);
             }
@@ -165,6 +168,7 @@ impl StatisticsService {
         match self.statistics_dao.delete_statistics(&mut transaction, statistics_id).instrument(span.clone()).await {
             Ok(()) => transaction.commit().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to commit transaction: {err}")))?,
             Err(err) => {
+                info!("Error occurred while deleting statistic: {:?}", err);
                 transaction.rollback().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to rollback transaction: {err}")))?;
                 return Err(err);
             }
@@ -207,6 +211,7 @@ impl StatisticsService {
         match self.statistics_dao.delete_value(&mut transaction, value_id).instrument(span.clone()).await {
             Ok(()) => transaction.commit().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to commit transaction: {err}")))?,
             Err(err) => {
+                info!("Error occurred while deleting value: {:?}", err);
                 transaction.rollback().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to rollback transaction: {err}")))?;
                 return Err(err);
             }
@@ -231,6 +236,7 @@ impl StatisticsService {
         match self.statistics_dao.add_value(&mut transaction, value_add_input).instrument(span.clone()).await {
             Ok(_value_id) => transaction.commit().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to commit transaction: {err}")))?,
             Err(err) => {
+                info!("Error occurred while adding value: {:?}", err);
                 transaction.rollback().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to rollback transaction: {err}")))?;
                 return Err(err);
             }
@@ -256,6 +262,7 @@ impl StatisticsService {
         match self.statistics_dao.update_value(&mut transaction, value_id, value_add_update_input).instrument(span.clone()).await {
             Ok(()) => transaction.commit().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to commit transaction: {err}")))?,
             Err(err) => {
+                info!("Error occurred while updating value: {:?}", err);
                 transaction.rollback().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to rollback transaction: {err}")))?;
                 return Err(err);
             }
