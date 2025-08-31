@@ -70,7 +70,7 @@ workers = 24
 httpPort = 8080
 
 [database.dbType.postgresql]
-connectionString = ""
+connectionString = "postgres://postgres:1234@localhost:5432/statistics"
 maxConnections = 200
 minConnections = 5
 acquireTimeout = 6000

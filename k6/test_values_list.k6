@@ -19,19 +19,18 @@ export let options = {
 
 let authHeaders = {
     headers: {
-        'Content-Digest': 'sha-256=:+KWibjBW62+wbe6z28z9iK50kAIAyYxwtZZru37J1N4=:',
+        'Content-Digest': 'sha-256=:RBNvo1WzZ4oRRq0W9+hknpT7T8If536DEMBg9hyq/4o=:',
         'Content-Type': 'application/json',
-	    'X-Request-Id': '78867567565464',
-        'x-fd-userid': '123456789',
-        'Signature-Input': 'sig=("x-fd-userid" "x-request-id" "@method");alg="ed25519";keyid="key4";created=1755289691;expires=1955289991',
-        'Signature': 'sig=:8C8nM7//ElYnSJpT/4YSuE4uSGTV7GWB6YjO+UdZpMyeVqsWAHwa/n3eBNNAPOAfBf42SPz5sdM1cW3WA2rIBQ==:'
+        'x-fd-userid':'123456789',
+        'x-request-id':'vhvjhvv565656',
+        'Signature-Input':'sig=(\"x-fd-userid\" \"x-request-id\" \"@method\");alg=\"rsa-pss-sha512\";keyid=\"key1\";created=1756655408;expires=1956655708',
+        'Signature':'sig=:cN5ZFZlfiNA+VnAVCAXOvLOyynJMt8yjPO4EIv2dPKBU4P6hGMHdC5iKPsyfekuj6RMIn9aG18BVc9usJzbEDXgkviw0LEo+9n/z9Hl2BTfTm4DqeCQgXhh4w7BQdC4ygETfyHDU1WQQ5ctoUApViLZH0Kgyd8ARgzE6ZF4MRhFKGr89eyQK6Gp2mqbbmco6WjCpbQrPs1zF3FAar0o4yDGPjZkxdov20l2J+5Nz1cUPF4geAwC4qHm6c5cg8QDp0zo884VxZ459zy8fqYTsYnFAJqlTKRALVX4HvwCc/A97wmj+aghvziF4gyH718KWDfuDVlINA4IXjpdaDWsNVA==:',
     },
 };
 
 export default function () {
-    let data = {};
-    let res = http.post('http://localhost:8080/api/services/v1_0/values:list?startIndex=0&pageSize=100', '{\n\n}', authHeaders);
-
+    let data = "{}";
+    let res = http.post('http://localhost:8080/api/services/v1_0/values:list?startIndex=0&pageSize=100', data, authHeaders);
     check(res, {        
         'status is 200': (r) => r.status === 200,
     });

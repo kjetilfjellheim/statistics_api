@@ -3,6 +3,7 @@ import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { uuidv4 } from 'https://jslib.k6.io/k6-utils/1.4.0/index.js';
 
+
 let myTrend = new Trend('my_trend');
 
 export let options = {
@@ -19,15 +20,18 @@ export let options = {
 
 let authHeaders = {
     headers: {
-        'Authorization': 'Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiYWRtaW4iOnRydWUsImlhdCI6MTc1Mjc4ODMwNCwiZXhwIjoxODkwMDAwMDAwfQ.DgESoJVdXpf8x7R1E1xEFvvskdxPkp6Y1_88-_gzulif179nDiAb2atvAVrfNnTJBZCAbQrXchx_3LB_d0wW0xpLERdInklwl41tH3wJHmYIXiQur1xOD335qPFyT5cANvNQGBSSHNAmy1FCYJWCObxxRPDDa9okY-KZgdigb0-v9e-XveoklTLe_fGbZzBtqqgmfG1HHI_CUDVwn32jRERqatBvpIsYjqwsc-YQPhr6ys7h1BqbMY3FmgQ0CB2Vq48nqbBGCSihEEybfbCFVm_g1WBugNova33byKo8dO9HpLzAqwYF1en0pnGqWyChQhzHU9bKzKF1KQgVcF7dmw',
-        'Content-Type': 'application/json',
-	    'X-Request-Id':  uuidv4()
+        'Content-Type':'application/json',
+        'x-fd-userid':'123456789',
+        'x-request-id':'vhvjhvv565656',
+        'Signature-Input':'sig=(\"x-fd-userid\" \"x-request-id\" \"@method\");alg=\"rsa-pss-sha512\";keyid=\"key1\";created=1756655408;expires=1956655708',
+        'Signature':'sig=:uYSIou5xwo4cC0pyiXFlbYdjuUiD3x7P2BM2mtQbU/hQhPUwUbWQTz2YrHJ6HcI4zCnlypgIGUKkFuxoxrq18jAIo/SGMuVBjsgZhmbLU+I71E3VUfxubekJgnNNdyBMrIe1CshNDM32Y+nlBk7YJznsguj+J1GZnbL+nV9lDZw0dlWcqQ152y1kLBUc/kawruLa2IkDe15MTHuC2bHN4Ipt/7TlzZ0vg7ez8+qEQP+07AbD2VsUlNWqJIqZbQ69ud+++Kr7+pIiiniU21zLEgCUYSRmt+U9Ft5xolCv8cd2M1W7qUIhEOfZDtb6kaP5rL5dedUbjiCXlDgDYI1iGw==:',
+        'Content-Digest':'sha-256=:3HN58yvc3Cmm5Zb1yjtJ5JlROnU9mGStgh5MomqZwuk=:'
     },
 };
 
 export default function () {
-    let data = { id: 6914, name: 'Test' };
-    let res = http.post('http://localhost:8080/api/services/v1_0/statistics', JSON.stringify(data), authHeaders);
+    let data = "{\"id\":1, \"name\":\"Test\"}";
+    let res = http.post('http://localhost:8080/api/services/v1_0/statistics', data, authHeaders);
     check(res, {
         'status is 200 or 409': (r) => r.status === 201 || r.status === 409,
     });

@@ -3,7 +3,6 @@ import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { uuidv4 } from 'https://jslib.k6.io/k6-utils/1.4.0/index.js';
 
-
 let myTrend = new Trend('my_trend');
 
 export let options = {
@@ -20,20 +19,17 @@ export let options = {
 
 let authHeaders = {
     headers: {
-        'Content-Type':'application/json',
         'x-fd-userid':'123456789',
         'x-request-id':'vhvjhvv565656',
         'Signature-Input':'sig=(\"x-fd-userid\" \"x-request-id\" \"@method\");alg=\"rsa-pss-sha512\";keyid=\"key1\";created=1756655408;expires=1956655708',
-        'Signature':'sig=:uYSIou5xwo4cC0pyiXFlbYdjuUiD3x7P2BM2mtQbU/hQhPUwUbWQTz2YrHJ6HcI4zCnlypgIGUKkFuxoxrq18jAIo/SGMuVBjsgZhmbLU+I71E3VUfxubekJgnNNdyBMrIe1CshNDM32Y+nlBk7YJznsguj+J1GZnbL+nV9lDZw0dlWcqQ152y1kLBUc/kawruLa2IkDe15MTHuC2bHN4Ipt/7TlzZ0vg7ez8+qEQP+07AbD2VsUlNWqJIqZbQ69ud+++Kr7+pIiiniU21zLEgCUYSRmt+U9Ft5xolCv8cd2M1W7qUIhEOfZDtb6kaP5rL5dedUbjiCXlDgDYI1iGw==:',
-        'Content-Digest':'sha-256=:RBNvo1WzZ4oRRq0W9+hknpT7T8If536DEMBg9hyq/4o=:'
+        'Signature':'sig=:WTUabFAuAaQc1S++fm8EmTt3QwqtTUdNybDjGVT2b6cdheX1dBDQna1Peer3tcE+dqPjM0K5NcUo7RcZSH88mkqaB83MZNRfc4QGf5tQvlMXHcOwtX+ae5waR2ehGIjGsq4Ncu2iQkVSFPY+YQPokVOKeNgPoTOejAPBP418Z7NMMO1Dqzijjb6p+r8z3mRMWGZCXuC1O8lMZRSmdyFHZkvYVUjHq4VOnAabAIr/fj5klr3LgweIY8O0U3iu944dv59+dMygX1+JukI5vls+t7eko0rbd+1955XRtCHEP/P7VG/3g6BaAhsWXPB1M464S4YjTYNdDnVcSCXJmqlIhA==:'
     },
 };
 
 export default function () {
-    let data = "{}";
-    let res = http.post('http://localhost:8080/api/services/v1_0/statistics:list?startIndex=0&pageSize=100', data, authHeaders);
+    let res = http.del('http://localhost:8080/api/services/v1_0/values/1', null, authHeaders);
     check(res, {
-        'status is 200': (r) => r.status === 200,
+        'status is 404': (r) => r.status === 404,
     });
     myTrend.add(res.timings.duration);
     sleep(1);

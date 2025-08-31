@@ -3,7 +3,6 @@ import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { uuidv4 } from 'https://jslib.k6.io/k6-utils/1.4.0/index.js';
 
-
 let myTrend = new Trend('my_trend');
 
 export let options = {
@@ -24,16 +23,16 @@ let authHeaders = {
         'x-fd-userid':'123456789',
         'x-request-id':'vhvjhvv565656',
         'Signature-Input':'sig=(\"x-fd-userid\" \"x-request-id\" \"@method\");alg=\"rsa-pss-sha512\";keyid=\"key1\";created=1756655408;expires=1956655708',
-        'Signature':'sig=:uYSIou5xwo4cC0pyiXFlbYdjuUiD3x7P2BM2mtQbU/hQhPUwUbWQTz2YrHJ6HcI4zCnlypgIGUKkFuxoxrq18jAIo/SGMuVBjsgZhmbLU+I71E3VUfxubekJgnNNdyBMrIe1CshNDM32Y+nlBk7YJznsguj+J1GZnbL+nV9lDZw0dlWcqQ152y1kLBUc/kawruLa2IkDe15MTHuC2bHN4Ipt/7TlzZ0vg7ez8+qEQP+07AbD2VsUlNWqJIqZbQ69ud+++Kr7+pIiiniU21zLEgCUYSRmt+U9Ft5xolCv8cd2M1W7qUIhEOfZDtb6kaP5rL5dedUbjiCXlDgDYI1iGw==:',
-        'Content-Digest':'sha-256=:RBNvo1WzZ4oRRq0W9+hknpT7T8If536DEMBg9hyq/4o=:'
+        'Signature':'sig=:cN5ZFZlfiNA+VnAVCAXOvLOyynJMt8yjPO4EIv2dPKBU4P6hGMHdC5iKPsyfekuj6RMIn9aG18BVc9usJzbEDXgkviw0LEo+9n/z9Hl2BTfTm4DqeCQgXhh4w7BQdC4ygETfyHDU1WQQ5ctoUApViLZH0Kgyd8ARgzE6ZF4MRhFKGr89eyQK6Gp2mqbbmco6WjCpbQrPs1zF3FAar0o4yDGPjZkxdov20l2J+5Nz1cUPF4geAwC4qHm6c5cg8QDp0zo884VxZ459zy8fqYTsYnFAJqlTKRALVX4HvwCc/A97wmj+aghvziF4gyH718KWDfuDVlINA4IXjpdaDWsNVA==:',
+        'Content-Digest':'sha-256=:lm6UJZ/rGJtVDRV2lM9R4yrbOX+qunSW3ORrwSaVzRM=:'
     },
 };
 
 export default function () {
-    let data = "{}";
-    let res = http.post('http://localhost:8080/api/services/v1_0/statistics:list?startIndex=0&pageSize=100', data, authHeaders);
+    let data = '{ \"id\": 1, \"name\": \"Tet\" }';
+    let res = http.post('http://localhost:8080/api/services/v1_0/municipalities', data, authHeaders);
     check(res, {
-        'status is 200': (r) => r.status === 200,
+        'status is 200 or 409': (r) => r.status === 201 || r.status === 409,
     });
     myTrend.add(res.timings.duration);
     sleep(1);
