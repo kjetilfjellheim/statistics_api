@@ -1322,6 +1322,7 @@ impl SignatureOutput {
  */
 #[derive(Debug)]
 struct SignatureInput {
+    original_signature_input: String,
     /**
      * The signature elements.
      * Example: sig=("date" "content-type" "content-digest" "@method" "@request-target")
@@ -1337,16 +1338,6 @@ struct SignatureInput {
      * Example: keyid="keyid"
      */
     keyid: String,
-    /**
-     * The timestamp when the signature was created.
-     * Example: created=1754334782
-     */
-    created: Option<usize>,
-    /**
-     * The timestamp when the signature expires.
-     * Example: expires=1754335082
-     */
-    expires: Option<usize>,
 }
 
 impl SignatureInput {
@@ -1364,6 +1355,7 @@ impl SignatureInput {
      */
     fn new(headers: &HashMap<String, String>, derive_elements: &DeriveInputElements, requirements: &HashSet<VerificationRequirement>, has_body: bool) -> Result<Self, HttpSignaturesError> {
         let signature_input = headers.get("signature-input").ok_or(HttpSignaturesError::MissingSignatureInputHeader)?;
+        let original_signature_input = signature_input.clone().replace("sig=", "");
         let (sig, alg, keyid, created, expires) = Self::get_signature_elements(headers, derive_elements, signature_input);
         Self::verify_created_requirement(requirements, created)?;
         Self::verify_expires_requirement(requirements, expires)?;
@@ -1376,7 +1368,7 @@ impl SignatureInput {
         Self::verify_algorithm(&alg)?;
         Self::verify_keyid(&keyid)?;
         Self::verify_request_headers(headers, &sig)?;
-        Ok(SignatureInput { sig, alg, keyid, created, expires })
+        Ok(SignatureInput { original_signature_input, sig, alg, keyid })
     }
 
     /**
@@ -1386,56 +1378,7 @@ impl SignatureInput {
      * formatted as "name=value" pairs, suitable for use in signature verification.
      */
     fn get_signature_params(&self) -> String {
-        let mut signature_params = String::new();
-        for element in &self.sig {
-            if !signature_params.is_empty() {
-                signature_params.push(' ');
-            } else {
-                signature_params.push('(');
-            }
-            match element {
-                SignatureElementEnum::HeaderString { name, value: _ } => {
-                    signature_params.push_str(&format!("\"{name}\""));
-                }
-                SignatureElementEnum::Method { value: _ } => {
-                    signature_params.push_str("\"@method\"");
-                }
-                SignatureElementEnum::RequestTarget { value: _ } => {
-                    signature_params.push_str("\"@request-target\"");
-                }
-                SignatureElementEnum::Query { value: _ } => {
-                    signature_params.push_str("\"@query\"");
-                }
-                SignatureElementEnum::Path { value: _ } => {
-                    signature_params.push_str("\"@path\"");
-                }
-                SignatureElementEnum::TargetUri { value: _ } => {
-                    signature_params.push_str("\"@target-uri\"");
-                }
-                SignatureElementEnum::Authority { value: _ } => {
-                    signature_params.push_str("\"@authority\"");
-                }
-                SignatureElementEnum::Scheme { value: _ } => {
-                    signature_params.push_str("\"@scheme\"");
-                }
-                SignatureElementEnum::Status { value: _ } => {
-                    signature_params.push_str("\"@status\"");
-                }
-            }
-        }
-        signature_params.push_str(");alg=\"");
-        signature_params.push_str(&self.alg);
-        signature_params.push_str("\";keyid=\"");
-        signature_params.push_str(&self.keyid);
-        signature_params.push('\"');
-        if let Some(created) = self.created {
-            signature_params.push_str(&format!(";created={created}"));
-        }
-        if let Some(expires) = self.expires {
-            signature_params.push_str(&format!(";expires={expires}"));
-        }
-        debug!("Signature Params: {}", signature_params);
-        signature_params
+        self.original_signature_input.clone()
     }
 
     /**
@@ -1477,8 +1420,8 @@ impl SignatureInput {
                 }            
             }
             signature_base.push('\n');
-        }        
-        signature_base.push_str(&format!("\"@signature-params\": {}", self.get_signature_params()));
+        }
+        signature_base.push_str(&format!("\"@signature-params\": {}", self.original_signature_input));
         debug!("Input Signature Base: \n{signature_base}");
         signature_base
     }
@@ -2112,8 +2055,6 @@ mod test {
         let parsed = SignatureInput::new(&headers, &derive_elements, &requirements, true).unwrap();
         assert_eq!(parsed.alg, "rsa-pss-sha512");
         assert_eq!(parsed.keyid, "key123");
-        assert_eq!(parsed.created, Some(1754065546));
-        assert_eq!(parsed.expires, Some(1754066746));
         assert_eq!(parsed.sig.len(), 5);
 
         let signature_params = parsed.get_signature_params();
@@ -2130,7 +2071,7 @@ mod test {
 \"content-digest\": SHA-256=:qqlAJmTxpB9A67xSyZk+tmrrNmYClY/fqig7ceZNsSM=:
 \"@method\": POST
 \"@request-target\": /api/v1/resource
-\"@signature-params\": (\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754065546;expires=1754066746\n"
+\"@signature-params\": (\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754065546;expires=1754066746"
         );
     }
 
@@ -2153,8 +2094,6 @@ mod test {
         let parsed = SignatureInput::new(&headers, &derive_elements, &requirements, true).unwrap();
         assert_eq!(parsed.alg, "rsa-pss-sha512");
         assert_eq!(parsed.keyid, "key123");
-        assert_eq!(parsed.created, Some(1754065546));
-        assert_eq!(parsed.expires, Some(1754066746));
         assert_eq!(parsed.sig.len(), 4);
 
         let signature_params = parsed.get_signature_params();
@@ -2170,7 +2109,7 @@ mod test {
 \"content-type\": application/json
 \"content-digest\": SHA-256=:qqlAJmTxpB9A67xSyZk+tmrrNmYClY/fqig7ceZNsSM=:
 \"@status\": 200
-\"@signature-params\": (\"date\" \"content-type\" \"content-digest\" \"@status\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754065546;expires=1754066746\n"
+\"@signature-params\": (\"date\" \"content-type\" \"content-digest\" \"@status\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754065546;expires=1754066746"
         );
     }
 
@@ -2188,8 +2127,6 @@ mod test {
         let parsed = SignatureInput::new(&headers, &derive_elements, &requirements, false).unwrap();
         assert_eq!(parsed.alg, "rsa-pss-sha512");
         assert_eq!(parsed.keyid, "key123");
-        assert_eq!(parsed.created, Some(1754175188));
-        assert_eq!(parsed.expires, Some(1754175488));
         assert_eq!(parsed.sig.len(), 3);
 
         let signature_params = parsed.get_signature_params();
@@ -2201,7 +2138,7 @@ mod test {
             "\"date\": Mon, 01 Jan 2024 00:00:00 GMT
 \"@method\": POST
 \"@request-target\": /api/v1/resource
-\"@signature-params\": (\"date\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754175188;expires=1754175488\n"
+\"@signature-params\": (\"date\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754175188;expires=1754175488"
         );
     }
 
@@ -2219,8 +2156,6 @@ mod test {
         let parsed = SignatureInput::new(&headers, &derive_elements, &requirements, false).unwrap();
         assert_eq!(parsed.alg, "rsa-pss-sha512");
         assert_eq!(parsed.keyid, "key123");
-        assert_eq!(parsed.created, Some(1754175188));
-        assert_eq!(parsed.expires, Some(1754175488));
         assert_eq!(parsed.sig.len(), 2);
 
         let signature_params = parsed.get_signature_params();
@@ -2231,7 +2166,7 @@ mod test {
             signature_base,
             "\"date\": Mon, 01 Jan 2024 00:00:00 GMT
 \"@status\": 200
-\"@signature-params\": (\"date\" \"@status\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754175188;expires=1754175488\n"
+\"@signature-params\": (\"date\" \"@status\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754175188;expires=1754175488"
         );
     }
 
@@ -2249,7 +2184,7 @@ mod test {
         let request_target = "/foo?param=value&pet=dog";
 
         let signature_str = format!(
-            "\"date\": Tue, 20 Apr 2021 02:07:55 GMT\n\"content-type\": application/json\n\"content-digest\": sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:\n\"@method\": {method}\n\"@request-target\": {request_target}\n\"@signature-params\": (\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754409493;expires=1754409793\n"
+            "\"date\": Tue, 20 Apr 2021 02:07:55 GMT\n\"content-type\": application/json\n\"content-digest\": sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:\n\"@method\": {method}\n\"@request-target\": {request_target}\n\"@signature-params\": (\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-pss-sha512\";keyid=\"key123\";created=1754409493;expires=1754409793"
         );
         let mut signature_result = vec![0; key_pair.public().modulus_len()];
         key_pair.sign(&RSA_PSS_SHA512, &rand, signature_str.as_bytes(), &mut signature_result).unwrap();
@@ -2288,7 +2223,7 @@ mod test {
         let request_target = "/foo?param=value&pet=dog";
 
         let signature_str = format!(
-            "\"date\": Tue, 20 Apr 2021 02:07:55 GMT\n\"content-type\": application/json\n\"content-digest\": sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:\n\"@method\": {method}\n\"@request-target\": {request_target}\n\"@signature-params\": (\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-v1_5-sha256\";keyid=\"key123\";created=1754409493;expires=1754409793\n"
+            "\"date\": Tue, 20 Apr 2021 02:07:55 GMT\n\"content-type\": application/json\n\"content-digest\": sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:\n\"@method\": {method}\n\"@request-target\": {request_target}\n\"@signature-params\": (\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"rsa-v1_5-sha256\";keyid=\"key123\";created=1754409493;expires=1754409793"
         );
         let mut signature_result = vec![0; key_pair.public().modulus_len()];
         key_pair.sign(&RSA_PKCS1_SHA256, &rand, signature_str.as_bytes(), &mut signature_result).unwrap();
@@ -2327,7 +2262,7 @@ mod test {
 
         let signature_str = format!(
             "\"date\": Tue, 20 Apr 2021 02:07:55 GMT\n\"content-type\": application/json\n\"content-digest\": sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:\n\"@method\": {method}\n\"@request-target\": {request_target}\n\"@signature-params\": {}",
-            "(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"ecdsa-p256-sha256\";keyid=\"key123\";created=1754409493;expires=1754409793\n"
+            "(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"ecdsa-p256-sha256\";keyid=\"key123\";created=1754409493;expires=1754409793"
         );
         let signature = STANDARD.encode(key_pair.sign(&rand, signature_str.as_bytes()).unwrap());
 
@@ -2364,7 +2299,7 @@ mod test {
 
         let signature_str = format!(
             "\"date\": Tue, 20 Apr 2021 02:07:55 GMT\n\"content-type\": application/json\n\"content-digest\": sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:\n\"@method\": {method}\n\"@request-target\": {request_target}\n\"@signature-params\": {}",
-            "(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"ecdsa-p384-sha384\";keyid=\"key123\";created=1754409493;expires=1754409793\n"
+            "(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"ecdsa-p384-sha384\";keyid=\"key123\";created=1754409493;expires=1754409793"
         );
         let signature = STANDARD.encode(key_pair.sign(&rand, signature_str.as_bytes()).unwrap());
 
@@ -2400,7 +2335,7 @@ mod test {
 
         let signature_str = format!(
             "\"date\": Tue, 20 Apr 2021 02:07:55 GMT\n\"content-type\": application/json\n\"content-digest\": sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:\n\"@method\": {method}\n\"@request-target\": {request_target}\n\"@signature-params\": {}",
-            "(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"ed25519\";keyid=\"key123\";created=1754409493;expires=1754409793\n"
+            "(\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"ed25519\";keyid=\"key123\";created=1754409493;expires=1754409793"
         );
 
         let signature = STANDARD.encode(key_pair.sign(signature_str.as_bytes()));
@@ -2432,7 +2367,7 @@ mod test {
         let request_target = "/foo?param=value&pet=dog";
 
         let signature_str = format!(
-            "\"date\": Tue, 20 Apr 2021 02:07:55 GMT\n\"content-type\": application/json\n\"content-digest\": sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:\n\"@method\": {method}\n\"@request-target\": {request_target}\n\"@signature-params\": (\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"hmac-sha256\";keyid=\"key123\";created=1754409493;expires=1754409793\n"
+            "\"date\": Tue, 20 Apr 2021 02:07:55 GMT\n\"content-type\": application/json\n\"content-digest\": sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:\n\"@method\": {method}\n\"@request-target\": {request_target}\n\"@signature-params\": (\"date\" \"content-type\" \"content-digest\" \"@method\" \"@request-target\");alg=\"hmac-sha256\";keyid=\"key123\";created=1754409493;expires=1754409793"
         );
 
         let signature = STANDARD.encode(ring::hmac::sign(&ring::hmac::Key::new(ring::hmac::HMAC_SHA256, b"TestHMACKey"), signature_str.as_bytes()));
@@ -2460,7 +2395,7 @@ mod test {
 
         let requirements: HashSet<VerificationRequirement> = HashSet::new();
 
-        let signature_str = "\"date\": Tue, 20 Apr 2021 02:07:55 GMT\n\"content-type\": application/json\n\"content-digest\": sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:\n\"@status\": 200\n\"@signature-params\": (\"date\" \"content-type\" \"content-digest\" \"@status\");alg=\"hmac-sha256\";keyid=\"key123\";created=1754409493;expires=1754409793\n".to_string();
+        let signature_str = "\"date\": Tue, 20 Apr 2021 02:07:55 GMT\n\"content-type\": application/json\n\"content-digest\": sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:\n\"@status\": 200\n\"@signature-params\": (\"date\" \"content-type\" \"content-digest\" \"@status\");alg=\"hmac-sha256\";keyid=\"key123\";created=1754409493;expires=1754409793".to_string();
 
         let signature = STANDARD.encode(ring::hmac::sign(&ring::hmac::Key::new(ring::hmac::HMAC_SHA256, b"TestHMACKey"), signature_str.as_bytes()));
 

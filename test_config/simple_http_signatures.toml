@@ -66,12 +66,12 @@ algorithm = "ed25519"
 keyId = "key6"
 
 [server]
-workers = 50
+workers = 24
 httpPort = 8080
 
 [database.dbType.postgresql]
 connectionString = ""
-maxConnections = 10
+maxConnections = 200
 minConnections = 5
 acquireTimeout = 6000
 acquireSlowThreshold = 3000
