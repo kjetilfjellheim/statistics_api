@@ -104,7 +104,7 @@ pub enum SecretType {
      * Private key file with the specified algorithm. Used for signing.
      */
     #[serde(rename_all = "camelCase")]
-    PrivateKey { path: String,  algorithm: String, passphrase: Option<String>, key_id: String },
+    PrivateKey { path: String, algorithm: String, passphrase: Option<String>, key_id: String },
     /**
      * Public key file.
      */
@@ -186,7 +186,12 @@ mod test {
                 GenerationRequirement::GenerateExpires { expires_secs: 60 },
                 GenerationRequirement::DerivedRequired { name: "@method".to_string() },
             ])),
-            generating_secret: Some(SecretType::PrivateKey { path: "./test_config/private_keys/private_key.pem".to_string(), algorithm: "rsa-pss-sha512".to_string(), passphrase: None, key_id: "key4".to_string() }),
+            generating_secret: Some(SecretType::PrivateKey {
+                path: "./test_config/private_keys/private_key.pem".to_string(),
+                algorithm: "rsa-pss-sha512".to_string(),
+                passphrase: None,
+                key_id: "key4".to_string(),
+            }),
         };
 
         let config = Config {
@@ -211,15 +216,30 @@ mod test {
         assert_eq!(config.server.workers, deserialized.server.workers);
         assert_eq!(config.server.http_port, deserialized.server.http_port);
         assert!(deserialized.server.https_config.is_none());
-        assert_eq!(deserialized.security.verification_secrets.first().unwrap(), &SecretType::PublicKeyFile { path: "./test_config/public_keys/public_key1.pem".to_string(), algorithm: "rsa-v1_5-sha256".to_string(), key_id: "key1".to_string() });
-        assert_eq!(deserialized.security.verification_secrets.get(1).unwrap(), &SecretType::PublicKeyFile { path: "./test_config/public_keys/public_key2.pem".to_string(), algorithm: "rsa-pss-sha512".to_string(), key_id: "key2".to_string() });
-        assert_eq!(deserialized.security.verification_secrets.get(2).unwrap(), &SecretType::SharedSecret { secret: "test".to_string(), algorithm: "hmac-sha256".to_string(), key_id: "key3".to_string() });
-        assert_eq!(deserialized.security.generating_secret, Some(SecretType::PrivateKey { path: "./test_config/private_keys/private_key.pem".to_string(), algorithm: "rsa-pss-sha512".to_string(), passphrase: None, key_id: "key4".to_string() }));
-        assert_eq!(deserialized.security.response_generation_requirements, Some(HashSet::from([
-            GenerationRequirement::HeaderRequiredIfIncluded { name: "x-request-ID".to_string() },
-            GenerationRequirement::GenerateCreated,
-            GenerationRequirement::GenerateExpires { expires_secs: 60 },
-            GenerationRequirement::DerivedRequired { name: "@method".to_string() },
-        ])));
+        assert_eq!(
+            deserialized.security.verification_secrets.first().unwrap(),
+            &SecretType::PublicKeyFile { path: "./test_config/public_keys/public_key1.pem".to_string(), algorithm: "rsa-v1_5-sha256".to_string(), key_id: "key1".to_string() }
+        );
+        assert_eq!(
+            deserialized.security.verification_secrets.get(1).unwrap(),
+            &SecretType::PublicKeyFile { path: "./test_config/public_keys/public_key2.pem".to_string(), algorithm: "rsa-pss-sha512".to_string(), key_id: "key2".to_string() }
+        );
+        assert_eq!(
+            deserialized.security.verification_secrets.get(2).unwrap(),
+            &SecretType::SharedSecret { secret: "test".to_string(), algorithm: "hmac-sha256".to_string(), key_id: "key3".to_string() }
+        );
+        assert_eq!(
+            deserialized.security.generating_secret,
+            Some(SecretType::PrivateKey { path: "./test_config/private_keys/private_key.pem".to_string(), algorithm: "rsa-pss-sha512".to_string(), passphrase: None, key_id: "key4".to_string() })
+        );
+        assert_eq!(
+            deserialized.security.response_generation_requirements,
+            Some(HashSet::from([
+                GenerationRequirement::HeaderRequiredIfIncluded { name: "x-request-ID".to_string() },
+                GenerationRequirement::GenerateCreated,
+                GenerationRequirement::GenerateExpires { expires_secs: 60 },
+                GenerationRequirement::DerivedRequired { name: "@method".to_string() },
+            ]))
+        );
     }
 }

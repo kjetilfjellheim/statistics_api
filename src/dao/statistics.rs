@@ -109,7 +109,7 @@ impl StatisticsDao {
     #[instrument(skip(self, connection_pool), fields(result), name = "dao:get_municipality_list")]
     pub async fn get_municipality_list(&self, connection_pool: &mut PgConnection, pagination_input: PaginationInput) -> Result<MunicipalityListOutputType, ApplicationError> {
         let span = tracing::Span::current();
-        let results: Vec<QueryMunicipalityListDbResp> =  sqlx::query_as(QUERY_MUNICIPALITY_LIST)
+        let results: Vec<QueryMunicipalityListDbResp> = sqlx::query_as(QUERY_MUNICIPALITY_LIST)
             .bind(pagination_input.page_size + 1)
             .bind(pagination_input.start_index)
             .fetch_all(connection_pool)

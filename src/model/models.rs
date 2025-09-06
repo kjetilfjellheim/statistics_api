@@ -325,20 +325,20 @@ impl ValuesListInputType {
      * A Result containing `ValuesListInputType` or an `ApplicationError`.
      */
     pub fn validate(self) -> Result<Self, ApplicationError> {
-        if let Some(id) = self.id_municipality {
-            if id < 0 {
-                return Err(ApplicationError::new(ErrorType::Validation, "Municipality ID must be non-negative".to_string()));
-            }
+        if let Some(id) = self.id_municipality
+            && id < 0
+        {
+            return Err(ApplicationError::new(ErrorType::Validation, "Municipality ID must be non-negative".to_string()));
         }
-        if let Some(id) = self.id_statistic {
-            if id < 0 {
-                return Err(ApplicationError::new(ErrorType::Validation, "Statistic ID must be non-negative".to_string()));
-            }
+        if let Some(id) = self.id_statistic
+            && id < 0
+        {
+            return Err(ApplicationError::new(ErrorType::Validation, "Statistic ID must be non-negative".to_string()));
         }
-        if let Some(year) = self.year {
-            if year < 0 {
-                return Err(ApplicationError::new(ErrorType::Validation, "Year must be non-negative".to_string()));
-            }
+        if let Some(year) = self.year
+            && year < 0
+        {
+            return Err(ApplicationError::new(ErrorType::Validation, "Year must be non-negative".to_string()));
         }
         Ok(self)
     }

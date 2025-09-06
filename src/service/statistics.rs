@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use sqlx::{Pool, Postgres};
-use tracing::{info, instrument, Instrument};
+use tracing::{Instrument, info, instrument};
 
 use crate::{
     dao::statistics::StatisticsDao,

@@ -9,37 +9,36 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{fs, thread};
 
+use crate::api::endpoints::{add_municipality, add_statistic, add_value, delete_municipality, delete_statistics, delete_value, list_municipalities, list_statistics, list_values, update_value};
 use crate::api::httpsignatures::{Algorithm, HttpSignaturesService, SecurityKeyEnum};
+use crate::api::state::AppState;
 use crate::dao::statistics::StatisticsDao;
 use crate::model::apperror::{ApplicationError, ErrorType};
 use crate::model::config::{AppSecurity, ApplicationArguments, DatabaseType, HttpsConfig, SecretType};
-use crate::api::endpoints::{add_municipality, add_statistic, add_value, list_municipalities, list_statistics, list_values, delete_statistics, delete_municipality, delete_value, update_value};
-use crate::api::state::AppState;
 use crate::service::statistics::StatisticsService;
 
 use actix_web::{App, HttpServer, web};
 use actix_web_opentelemetry::{RequestMetrics, RequestTracing};
 use actix_web_prom::{PrometheusMetrics, PrometheusMetricsBuilder};
 use clap::Parser;
-use opentelemetry::{global, KeyValue};
-use opentelemetry_otlp::{WithExportConfig};
+use opentelemetry::trace::TracerProvider as _;
+use opentelemetry::{KeyValue, global};
+use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::SdkTracerProvider;
-use opentelemetry_sdk::Resource;
+use opentelemetry_semantic_conventions::{
+    SCHEMA_URL,
+    attribute::{DEPLOYMENT_ENVIRONMENT_NAME, SERVICE_VERSION},
+};
 use prometheus::IntGauge;
 use rustls::pki_types::PrivateKeyDer;
 use rustls::{ServerConfig, SupportedProtocolVersion};
 use rustls_pemfile::{certs, pkcs8_private_keys};
 use sqlx::{Pool, Postgres, pool};
-use opentelemetry_semantic_conventions::{
-    attribute::{DEPLOYMENT_ENVIRONMENT_NAME, SERVICE_VERSION},
-    SCHEMA_URL,
-};
 use tracing::Level;
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use opentelemetry::{trace::TracerProvider as _};
-
 
 /**
  * Guess, but this might be the main entry point for the application.
@@ -51,39 +50,7 @@ async fn main() -> std::io::Result<()> {
     let config = get_config(&args.config_file)?;
 
     if let Some(jaeger_url) = config.clone().logging.jaeger_url {
-        global::set_text_map_propagator(TraceContextPropagator::new());
-
-        let service_name_resource = Resource::builder_empty()
-            .with_attribute(KeyValue::new("service.name", "statistics api"))
-            .with_schema_url(
-            [
-                KeyValue::new(SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
-                KeyValue::new(DEPLOYMENT_ENVIRONMENT_NAME, "develop"),
-            ],
-            SCHEMA_URL,)
-            .build();
-
-        let tracer_provider = SdkTracerProvider::builder()
-            .with_batch_exporter(
-                opentelemetry_otlp::SpanExporter::builder()
-                    .with_http()
-                    .with_protocol(opentelemetry_otlp::Protocol::HttpJson)
-                    .with_endpoint(jaeger_url.as_str())
-                    .build().map_err(|err| std::io::Error::other(format!("Failed to create OTLP trace exporter: {err}")))?,
-            )
-            .with_resource(service_name_resource)
-            .build();
-
-        let tracer = tracer_provider.tracer("statistics_api");
-        tracing_subscriber::registry()
-            .with(tracing_subscriber::filter::LevelFilter::from_level(
-                Level::INFO,
-            ))
-            .with(tracing_subscriber::fmt::layer())
-            .with(OpenTelemetryLayer::new(tracer))
-            .init();
-
-        global::set_tracer_provider(tracer_provider);
+        init_telemetry(&jaeger_url)?;
     }
 
     let connection_pool: Pool<Postgres> = match config.clone().database.db_type {
@@ -152,6 +119,42 @@ async fn main() -> std::io::Result<()> {
     };
 
     server_init.workers(config.server.workers).run().await
+}
+
+/**
+ * Initializes the telemetry for the application.
+ *
+ * #Arguments
+ * `jaeger_url`: The URL of the Jaeger instance to send traces to.
+ *
+ * #Returns
+ * A `Result` indicating success or failure.
+ */
+fn init_telemetry(jaeger_url: &str) -> Result<(), std::io::Error> {
+    global::set_text_map_propagator(TraceContextPropagator::new());
+
+    let service_name_resource = Resource::builder_empty()
+        .with_attribute(KeyValue::new("service.name", "statistics api"))
+        .with_schema_url([KeyValue::new(SERVICE_VERSION, env!("CARGO_PKG_VERSION")), KeyValue::new(DEPLOYMENT_ENVIRONMENT_NAME, "develop")], SCHEMA_URL)
+        .build();
+
+    let tracer_provider = SdkTracerProvider::builder()
+        .with_batch_exporter(
+            opentelemetry_otlp::SpanExporter::builder()
+                .with_http()
+                .with_protocol(opentelemetry_otlp::Protocol::HttpJson)
+                .with_endpoint(jaeger_url)
+                .build()
+                .map_err(|err| std::io::Error::other(format!("Failed to create OTLP trace exporter: {err}")))?,
+        )
+        .with_resource(service_name_resource)
+        .build();
+
+    let tracer = tracer_provider.tracer("statistics_api");
+    tracing_subscriber::registry().with(tracing_subscriber::filter::LevelFilter::from_level(Level::INFO)).with(tracing_subscriber::fmt::layer()).with(OpenTelemetryLayer::new(tracer)).init();
+
+    global::set_tracer_provider(tracer_provider);
+    Ok(())
 }
 
 /**
@@ -256,11 +259,18 @@ fn get_security_service(app_security: &AppSecurity) -> Result<HttpSignaturesServ
     let generating_secret = match &app_security.generating_secret {
         Some(SecretType::PrivateKey { path, algorithm, passphrase, key_id }) => {
             let file_contents = fs::read(path).map_err(|err| std::io::Error::other(format!("Failed to read private key file: {err}")))?;
-            Some(SecurityKeyEnum::PrivateKey { contents: file_contents, algorithm: Algorithm::from_str(algorithm).map_err(|_err| std::io::Error::other(format!("Unsupported algorithm {algorithm} for generating secret")))? , passphrase: passphrase.clone(), key_id: key_id.clone() })
-        },
-        Some(SecretType::SharedSecret { secret, algorithm, key_id }) => {
-            Some(SecurityKeyEnum::SharedSecret { contents: secret.clone(), algorithm: Algorithm::from_str(algorithm).map_err(|_err| std::io::Error::other(format!("Unsupported algorithm {algorithm} for generating secret")))?, key_id: key_id.clone() })
-        },
+            Some(SecurityKeyEnum::PrivateKey {
+                contents: file_contents,
+                algorithm: Algorithm::from_str(algorithm).map_err(|_err| std::io::Error::other(format!("Unsupported algorithm {algorithm} for generating secret")))?,
+                passphrase: passphrase.clone(),
+                key_id: key_id.clone(),
+            })
+        }
+        Some(SecretType::SharedSecret { secret, algorithm, key_id }) => Some(SecurityKeyEnum::SharedSecret {
+            contents: secret.clone(),
+            algorithm: Algorithm::from_str(algorithm).map_err(|_err| std::io::Error::other(format!("Unsupported algorithm {algorithm} for generating secret")))?,
+            key_id: key_id.clone(),
+        }),
         Some(_) => return Err(std::io::Error::other("Generating secret must be of type PrivateKey or SharedSecret")),
         None => None,
     };
@@ -270,12 +280,34 @@ fn get_security_service(app_security: &AppSecurity) -> Result<HttpSignaturesServ
         .map(|secret_type| match secret_type {
             SecretType::PublicKeyFile { path, algorithm, key_id } => {
                 let file_contents = fs::read(path).map_err(|err| std::io::Error::other(format!("Failed to read public key file: {err}")))?;
-                Ok((key_id.clone(), SecurityKeyEnum::PublicKey { contents: file_contents, algorithm: Algorithm::from_str(algorithm).map_err(|_err| std::io::Error::other(format!("Unsupported algorithm {algorithm} for keyid {key_id}")))?, key_id: key_id.clone() }))
+                Ok((
+                    key_id.clone(),
+                    SecurityKeyEnum::PublicKey {
+                        contents: file_contents,
+                        algorithm: Algorithm::from_str(algorithm).map_err(|_err| std::io::Error::other(format!("Unsupported algorithm {algorithm} for keyid {key_id}")))?,
+                        key_id: key_id.clone(),
+                    },
+                ))
             }
-            SecretType::SharedSecret { secret, algorithm, key_id } => Ok((key_id.clone(), SecurityKeyEnum::SharedSecret { contents: secret.clone(), algorithm: Algorithm::from_str(algorithm).map_err(|_err| std::io::Error::other(format!("Unsupported algorithm {algorithm} for keyid {key_id}")))?, key_id: key_id.clone() })),
+            SecretType::SharedSecret { secret, algorithm, key_id } => Ok((
+                key_id.clone(),
+                SecurityKeyEnum::SharedSecret {
+                    contents: secret.clone(),
+                    algorithm: Algorithm::from_str(algorithm).map_err(|_err| std::io::Error::other(format!("Unsupported algorithm {algorithm} for keyid {key_id}")))?,
+                    key_id: key_id.clone(),
+                },
+            )),
             SecretType::PrivateKey { path, algorithm, passphrase, key_id } => {
                 let file_contents = fs::read(path).map_err(|err| std::io::Error::other(format!("Failed to read private key file: {err}")))?;
-                Ok((key_id.clone(), SecurityKeyEnum::PrivateKey { contents: file_contents, algorithm: Algorithm::from_str(algorithm).map_err(|_err| std::io::Error::other(format!("Unsupported algorithm {algorithm} for keyid {key_id}")))?, passphrase: passphrase.clone(), key_id: key_id.clone() }))
+                Ok((
+                    key_id.clone(),
+                    SecurityKeyEnum::PrivateKey {
+                        contents: file_contents,
+                        algorithm: Algorithm::from_str(algorithm).map_err(|_err| std::io::Error::other(format!("Unsupported algorithm {algorithm} for keyid {key_id}")))?,
+                        passphrase: passphrase.clone(),
+                        key_id: key_id.clone(),
+                    },
+                ))
             }
         })
         .collect::<Result<HashMap<String, SecurityKeyEnum>, std::io::Error>>()?;

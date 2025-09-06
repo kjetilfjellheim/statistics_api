@@ -1,16 +1,22 @@
 use std::collections::HashMap;
 
-use actix_web::{http::{header::HeaderMap, StatusCode}, HttpRequest, HttpResponse, ResponseError};
+use actix_web::{
+    HttpRequest, HttpResponse, ResponseError,
+    http::{StatusCode, header::HeaderMap},
+};
 use chrono::Utc;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha512};
 use tracing::debug;
 
-use crate::{api::httpsignatures::DeriveInputElements, model::{
-    apperror::{ApplicationError, ErrorType},
-    models::{MunicipalityDetailType, MunicipalityListOutputType, PaginationOutput, StatisticDetailType, StatisticsListOutputType, ValueDetailType, ValuesListOutputType},
-}};
+use crate::{
+    api::httpsignatures::DeriveInputElements,
+    model::{
+        apperror::{ApplicationError, ErrorType},
+        models::{MunicipalityDetailType, MunicipalityListOutputType, PaginationOutput, StatisticDetailType, StatisticsListOutputType, ValueDetailType, ValuesListOutputType},
+    },
+};
 use base64::{Engine, engine::general_purpose::STANDARD};
 
 /***************** Municipality:list models *********************/
@@ -485,13 +491,12 @@ impl From<&HttpRequest> for DeriveInputElements {
             Some(http_request.full_url().authority()),
             Some(http_request.uri().scheme_str().unwrap_or("http")),
             Some(http_request.uri().query().unwrap_or("")),
-            None
+            None,
         );
         debug!("Derived Elements: {:?}", derive_elements);
         derive_elements
     }
 }
-
 
 impl From<&HttpResponse> for DeriveInputElements {
     /**
@@ -504,21 +509,11 @@ impl From<&HttpResponse> for DeriveInputElements {
      * A new instance of `DeriveInputElements` derived from the HTTP response.
      */
     fn from(http_response: &HttpResponse) -> Self {
-        let derive_elements = DeriveInputElements::new(
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            Some(http_response.status().as_u16())
-        );
+        let derive_elements = DeriveInputElements::new(None, None, None, None, None, None, None, Some(http_response.status().as_u16()));
         debug!("Derived Elements: {:?}", derive_elements);
         derive_elements
     }
 }
-
 
 /**
  * Generates a SHA-512 digest of the given body.
@@ -656,16 +651,7 @@ impl From<HttpRequest> for DeriveInputElements {
  */
 impl From<&mut HttpResponse> for DeriveInputElements {
     fn from(http_response: &mut HttpResponse) -> Self {
-        DeriveInputElements::new(
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            Some(http_response.status().as_u16()),
-        )
+        DeriveInputElements::new(None, None, None, None, None, None, None, Some(http_response.status().as_u16()))
     }
 }
 
