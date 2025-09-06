@@ -10,24 +10,36 @@ use std::time::Duration;
 use std::{fs, thread};
 
 use crate::api::httpsignatures::{Algorithm, HttpSignaturesService, SecurityKeyEnum};
-use crate::api::middleware;
 use crate::dao::statistics::StatisticsDao;
 use crate::model::apperror::{ApplicationError, ErrorType};
 use crate::model::config::{AppSecurity, ApplicationArguments, DatabaseType, HttpsConfig, SecretType};
-
 use crate::api::endpoints::{add_municipality, add_statistic, add_value, list_municipalities, list_statistics, list_values, delete_statistics, delete_municipality, delete_value, update_value};
 use crate::api::state::AppState;
 use crate::service::statistics::StatisticsService;
-use actix_web::middleware::{Logger, from_fn};
+
 use actix_web::{App, HttpServer, web};
+use actix_web_opentelemetry::{RequestMetrics, RequestTracing};
 use actix_web_prom::{PrometheusMetrics, PrometheusMetricsBuilder};
 use clap::Parser;
+use opentelemetry::{global, KeyValue};
+use opentelemetry_otlp::{WithExportConfig};
+use opentelemetry_sdk::propagation::TraceContextPropagator;
+use opentelemetry_sdk::trace::SdkTracerProvider;
+use opentelemetry_sdk::Resource;
 use prometheus::IntGauge;
 use rustls::pki_types::PrivateKeyDer;
 use rustls::{ServerConfig, SupportedProtocolVersion};
 use rustls_pemfile::{certs, pkcs8_private_keys};
 use sqlx::{Pool, Postgres, pool};
-use tracing_subscriber::EnvFilter;
+use opentelemetry_semantic_conventions::{
+    attribute::{DEPLOYMENT_ENVIRONMENT_NAME, SERVICE_VERSION},
+    SCHEMA_URL,
+};
+use tracing::Level;
+use tracing_opentelemetry::OpenTelemetryLayer;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use opentelemetry::{trace::TracerProvider as _};
+
 
 /**
  * Guess, but this might be the main entry point for the application.
@@ -38,25 +50,41 @@ async fn main() -> std::io::Result<()> {
 
     let config = get_config(&args.config_file)?;
 
-    let mut filter = EnvFilter::try_from_default_env().map_err(|err| std::io::Error::other(format!("Failed to create logging filter: {err}")))?;
-    for directive in &config.logging.directives {
-        filter = filter.add_directive(directive.parse().map_err(|err| std::io::Error::other(format!("Failed to parse logging directive: {err}")))?);
-    }
-    let log_file = std::fs::OpenOptions::new().append(true).create(true).open(&config.logging.logfile).map_err(|err| std::io::Error::other(format!("Failed to open log file: {err}")))?;
+    if let Some(jaeger_url) = config.clone().logging.jaeger_url {
+        global::set_text_map_propagator(TraceContextPropagator::new());
 
-    // Initialize logging
-    tracing_subscriber::fmt()
-        .pretty()
-        .with_writer(log_file)
-        .with_env_filter(filter)
-        .with_target(config.logging.target)
-        .with_thread_ids(config.logging.thread_ids)
-        .with_thread_names(config.logging.thread_names)
-        .with_line_number(config.logging.line_number)
-        .with_level(config.logging.level)
-        .with_ansi(config.logging.ansi)
-        .with_file(config.logging.file)
-        .init();
+        let service_name_resource = Resource::builder_empty()
+            .with_attribute(KeyValue::new("service.name", "statistics api"))
+            .with_schema_url(
+            [
+                KeyValue::new(SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
+                KeyValue::new(DEPLOYMENT_ENVIRONMENT_NAME, "develop"),
+            ],
+            SCHEMA_URL,)
+            .build();
+
+        let tracer_provider = SdkTracerProvider::builder()
+            .with_batch_exporter(
+                opentelemetry_otlp::SpanExporter::builder()
+                    .with_http()
+                    .with_protocol(opentelemetry_otlp::Protocol::HttpJson)
+                    .with_endpoint(jaeger_url.as_str())
+                    .build().map_err(|err| std::io::Error::other(format!("Failed to create OTLP trace exporter: {err}")))?,
+            )
+            .with_resource(service_name_resource)
+            .build();
+
+        let tracer = tracer_provider.tracer("statistics_api");
+        tracing_subscriber::registry()
+            .with(tracing_subscriber::filter::LevelFilter::from_level(
+                Level::INFO,
+            ))
+            .with(tracing_subscriber::fmt::layer())
+            .with(OpenTelemetryLayer::new(tracer))
+            .init();
+
+        global::set_tracer_provider(tracer_provider);
+    }
 
     let connection_pool: Pool<Postgres> = match config.clone().database.db_type {
         DatabaseType::Postgresql { connection_string, max_connections, min_connections, acquire_timeout, acquire_slow_threshold, idle_timeout, max_lifetime } => pool::PoolOptions::new()
@@ -80,7 +108,7 @@ async fn main() -> std::io::Result<()> {
     let state = web::Data::new(AppState::new(http_signatures_service, statistics_service));
 
     let prometheus = PrometheusMetricsBuilder::new("")
-        .endpoint("/metrics/prometheus")
+        .endpoint("/metrics")
         .mask_unmatched_patterns("UNKNOWN")
         .build()
         .map_err(|err| std::io::Error::other(format!("Failed to create Prometheus metrics: {err}")))?;
@@ -100,9 +128,8 @@ async fn main() -> std::io::Result<()> {
 
     let server_init = HttpServer::new(move || {
         App::new()
-            .wrap(prometheus.clone())
-            .wrap(Logger::new("\"%{x-request-id}i\" \"%{Referer}i\" \"%{User-Agent}i\" %a \"%r\" %s %b %T"))
-            .wrap(from_fn(middleware::timing_middleware))
+            .wrap(RequestTracing::default())
+            .wrap(RequestMetrics::default())
             .app_data(state.clone())
             .service(add_municipality)
             .service(add_statistic)

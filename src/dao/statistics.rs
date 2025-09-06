@@ -106,10 +106,10 @@ impl StatisticsDao {
      * # Returns
      * A Result containing `MunicipalityListOutputType` or an `ApplicationError`.
      */
-    #[instrument(skip(self, connection_pool), fields(result))]
+    #[instrument(skip(self, connection_pool), fields(result), name = "dao:get_municipality_list")]
     pub async fn get_municipality_list(&self, connection_pool: &mut PgConnection, pagination_input: PaginationInput) -> Result<MunicipalityListOutputType, ApplicationError> {
         let span = tracing::Span::current();
-        let results: Vec<QueryMunicipalityListDbResp> = sqlx::query_as(QUERY_MUNICIPALITY_LIST)
+        let results: Vec<QueryMunicipalityListDbResp> =  sqlx::query_as(QUERY_MUNICIPALITY_LIST)
             .bind(pagination_input.page_size + 1)
             .bind(pagination_input.start_index)
             .fetch_all(connection_pool)
@@ -135,7 +135,7 @@ impl StatisticsDao {
      * # Returns
      * A result indicating success or failure of the operation.
      */
-    #[instrument(skip(self, transaction), fields(result))]
+    #[instrument(skip(self, transaction), fields(result), name = "dao:add_municipality")]
     pub async fn add_municipality(&self, transaction: &mut PgConnection, municipality_add_input: MunicipalityAddInputType) -> Result<(), ApplicationError> {
         let span = tracing::Span::current();
         sqlx::query(ADD_MUNICIPALITY)
@@ -159,7 +159,7 @@ impl StatisticsDao {
      * # Returns
      * A result indicating success or failure of the operation.
      */
-    #[instrument(skip(self, transaction), fields(result))]
+    #[instrument(skip(self, transaction), fields(result), name = "dao:delete_municipality")]
     pub async fn delete_municipality(&self, transaction: &mut PgConnection, municipality_id: i64) -> Result<(), ApplicationError> {
         let span = tracing::Span::current();
         let result = sqlx::query(DELETE_MUNICIPALITY)
@@ -189,7 +189,7 @@ impl StatisticsDao {
      * # Returns
      * A Result containing `StatisticsListOutputType` or an `ApplicationError`.
      */
-    #[instrument(skip(self, connection_pool), fields(result))]
+    #[instrument(skip(self, connection_pool), fields(result), name = "dao:get_statistics_list")]
     pub async fn get_statistics_list(&self, connection_pool: &mut PgConnection, pagination_input: PaginationInput) -> Result<StatisticsListOutputType, ApplicationError> {
         let span = tracing::Span::current();
         let results: Vec<QueryStatisticListDbResp> = sqlx::query_as(QUERY_STATISTICS_LIST)
@@ -218,7 +218,7 @@ impl StatisticsDao {
      * # Returns
      * A result indicating success or failure of the operation.
      */
-    #[instrument(skip(self, transaction), fields(result))]
+    #[instrument(skip(self, transaction), fields(result), name = "dao:add_statistics")]
     pub async fn add_statistics(&self, transaction: &mut PgConnection, statistics_add_input: StatisticAddInputType) -> Result<(), ApplicationError> {
         let span = tracing::Span::current();
         sqlx::query(ADD_STATISTIC)
@@ -242,7 +242,7 @@ impl StatisticsDao {
      * # Returns
      * A result indicating success or failure of the operation.
      */
-    #[instrument(skip(self, transaction), fields(result))]
+    #[instrument(skip(self, transaction), fields(result), name = "dao:delete_statistics")]
     pub async fn delete_statistics(&self, transaction: &mut PgConnection, statistics_id: i64) -> Result<(), ApplicationError> {
         let span = tracing::Span::current();
         let result = sqlx::query(DELETE_STATISTIC)
@@ -272,7 +272,7 @@ impl StatisticsDao {
      * # Returns
      * A result indicating success or failure of the operation.
      */
-    #[instrument(skip(self, transaction), fields(result))]
+    #[instrument(skip(self, transaction), fields(result), name = "dao:delete_value")]
     pub async fn delete_value(&self, transaction: &mut PgConnection, value_id: i64) -> Result<(), ApplicationError> {
         let span = tracing::Span::current();
         let result = sqlx::query(DELETE_VALUE)
@@ -303,7 +303,7 @@ impl StatisticsDao {
      * # Returns
      * A result containing the `ValuesListOutputType` with the retrieved values and pagination information.
      */
-    #[instrument(skip(self, connection_pool), fields(result))]
+    #[instrument(skip(self, connection_pool), fields(result), name = "dao:get_values_list")]
     pub async fn get_values_list(&self, connection_pool: &mut PgConnection, pagination_input: PaginationInput, filter_params: ValuesListInputType) -> Result<ValuesListOutputType, ApplicationError> {
         let span = tracing::Span::current();
         let results: Vec<QueryValuesListDbResp> = sqlx::query_as(QUERY_VALUES_LIST)
@@ -335,7 +335,7 @@ impl StatisticsDao {
      * # Returns
      * A result indicating success or failure of the operation.
      */
-    #[instrument(skip(self, transaction), fields(result))]
+    #[instrument(skip(self, transaction), fields(result), name = "dao:add_value")]
     pub async fn add_value(&self, transaction: &mut PgConnection, value_add_input: ValuesAddUpdateInputType) -> Result<i64, ApplicationError> {
         let span = tracing::Span::current();
         let next_id: (i64,) = sqlx::query_as(NEXT_VALUE_ID).fetch_one(transaction.as_mut()).instrument(span.clone()).await.map_err(|err| Self::handle_database_error(err.as_database_error()))?;
@@ -365,7 +365,7 @@ impl StatisticsDao {
      * # Returns
      * A result indicating success or failure of the operation.
      */
-    #[instrument(skip(self, transaction), fields(result))]
+    #[instrument(skip(self, transaction), fields(result), name = "dao:update_value")]
     pub async fn update_value(&self, transaction: &mut PgConnection, value_id: i64, value_add_update_input: ValuesAddUpdateInputType) -> Result<(), ApplicationError> {
         let span = tracing::Span::current();
         let result = sqlx::query("UPDATE data SET id_municipality = $1, id_statistic = $2, value = $3, year = $4, updated_by = $5, updated_at = now() WHERE id = $6")

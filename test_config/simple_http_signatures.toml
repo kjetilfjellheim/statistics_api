@@ -1,13 +1,5 @@
 [logging]
-target = true
-thread_ids = true
-thread_names = false
-line_number = false
-level = true
-ansi = false
-file = false
-logfile = "./logs/app.log"
-directives = ["sqlx::query=debug",]
+jaegerUrl = "http://localhost:4318/v1/traces" # Optional URL for Jaeger collector. If not set, OpenTelemetry tracing is disabled.
 
 [security]
 incomingVerificationRequirements = [

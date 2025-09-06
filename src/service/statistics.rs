@@ -51,7 +51,7 @@ impl StatisticsService {
      * # Returns
      * A Result containing `MunicipalityListOutputType` or an `ApplicationError`.
      */
-    #[instrument(skip(self))]
+    #[instrument(skip(self), name = "service:get_municipality_list")]
     pub async fn get_municipality_list(&self, pagination_input: PaginationInput) -> Result<MunicipalityListOutputType, ApplicationError> {
         let span = tracing::Span::current();
         let mut connection =
@@ -68,7 +68,7 @@ impl StatisticsService {
      * # Returns
      * A Result indicating success or an `ApplicationError`.
      */
-    #[instrument(skip(self))]
+    #[instrument(skip(self), name = "service:add_municipality")]
     pub async fn add_municipality(&self, municipality_add_input: MunicipalityAddInputType) -> Result<(), ApplicationError> {
         let span: tracing::Span = tracing::Span::current();
         let mut transaction =
@@ -93,7 +93,7 @@ impl StatisticsService {
      * # Returns
      * A Result indicating success or an `ApplicationError`.
      */
-    #[instrument(skip(self))]
+    #[instrument(skip(self), name = "service:delete_municipality")]
     pub async fn delete_municipality(&self, municipality_id: i64) -> Result<(), ApplicationError> {
         let span: tracing::Span = tracing::Span::current();
         let mut transaction =
@@ -118,7 +118,7 @@ impl StatisticsService {
      * # Returns
      * A Result containing `StatisticsListOutputType` or an `ApplicationError`.
      */
-    #[instrument(skip(self))]
+    #[instrument(skip(self), name = "service:get_statistics_list")]
     pub async fn get_statistics_list(&self, pagination_input: PaginationInput) -> Result<StatisticsListOutputType, ApplicationError> {
         let span: tracing::Span = tracing::Span::current();
         let mut connection =
@@ -135,7 +135,7 @@ impl StatisticsService {
      * # Returns
      * A Result indicating success or an `ApplicationError`.
      */
-    #[instrument(skip(self))]
+    #[instrument(skip(self), name = "service:add_statistic")]
     pub async fn add_statistic(&self, statistics_add_input: StatisticAddInputType) -> Result<(), ApplicationError> {
         let span: tracing::Span = tracing::Span::current();
         let mut transaction =
@@ -160,7 +160,7 @@ impl StatisticsService {
      * # Returns
      * A Result indicating success or an `ApplicationError`.
      */
-    #[instrument(skip(self))]
+    #[instrument(skip(self), name = "service:delete_statistics")]
     pub async fn delete_statistics(&self, statistics_id: i64) -> Result<(), ApplicationError> {
         let span: tracing::Span = tracing::Span::current();
         let mut transaction =
@@ -186,7 +186,7 @@ impl StatisticsService {
      * # Returns
      * A Result containing `ValuesListOutputType` or an `ApplicationError`.
      */
-    #[instrument(skip(self))]
+    #[instrument(skip(self), name = "service:get_values_list")]
     pub async fn get_values_list(&self, pagination_input: PaginationInput, filter_params: ValuesListInputType) -> Result<ValuesListOutputType, ApplicationError> {
         let span: tracing::Span = tracing::Span::current();
         let mut connection =
@@ -203,7 +203,7 @@ impl StatisticsService {
      * # Returns
      * A Result indicating success or an `ApplicationError`.
      */
-    #[instrument(skip(self))]
+    #[instrument(skip(self), name = "service:delete_value")]
     pub async fn delete_value(&self, value_id: i64) -> Result<(), ApplicationError> {
         let span: tracing::Span = tracing::Span::current();
         let mut transaction =
@@ -228,7 +228,7 @@ impl StatisticsService {
      * # Returns
      * A Result indicating success or an `ApplicationError`.
      */
-    #[instrument(skip(self))]
+    #[instrument(skip(self), name = "service:add_value")]
     pub async fn add_value(&self, value_add_input: ValuesAddUpdateInputType) -> Result<(), ApplicationError> {
         let span: tracing::Span = tracing::Span::current();
         let mut transaction =
@@ -254,7 +254,7 @@ impl StatisticsService {
      * # Returns
      * A Result indicating success or an `ApplicationError`.
      */
-    #[instrument(skip(self))]
+    #[instrument(skip(self), name = "service:update_value")]
     pub async fn update_value(&self, value_id: i64, value_add_update_input: ValuesAddUpdateInputType) -> Result<(), ApplicationError> {
         let span: tracing::Span = tracing::Span::current();
         let mut transaction =

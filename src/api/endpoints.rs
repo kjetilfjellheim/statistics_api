@@ -2,13 +2,14 @@ use actix_web::{
     delete, http::{header::{HeaderName, HeaderValue}}, post, put, web::{self, Bytes, Path}, HttpRequest, HttpResponse
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use opentelemetry::{global, trace::{Span, SpanKind, Tracer}, KeyValue};
 use sha2::{Digest, Sha256, Sha384, Sha512};
-use tracing::{debug, error, info, instrument, Instrument, warn};
+use tracing::{debug, error, info, instrument, warn, Instrument};
 
 use crate::{
     api::{
         httpsignatures::DeriveInputElements, rest::{
-            convert_headers_to_lowercase, generate_digest, MunicipalityAddRequest, MunicipalityListResponse, PaginationQuery, StatisticsAddRequest, StatisticsListRequest, StatisticsListResponse, ValuesAddUpdateRequest, ValuesListRequest, ValuesListResponse
+            convert_headers_to_lowercase, generate_digest, MunicipalityAddRequest, MunicipalityListResponse, PaginationQuery, StatisticsAddRequest, StatisticsListResponse, ValuesAddUpdateRequest, ValuesListRequest, ValuesListResponse
         }, state::AppState
     },
     model::{
@@ -20,7 +21,7 @@ use crate::{
 /**
  * Endpoint to get a list of statistics types.
  */
-#[instrument(level = "info", skip(http_request, app_state, payload), fields(service = "listStatistics", trace_id = get_trace_id(&http_request), result))]
+#[instrument(level = "info", skip(http_request, app_state, payload), fields(service = "listStatistics", trace_id = get_trace_id(&http_request), result), name = "api:list_statistics")]
 #[post("/api/services/v1_0/statistics:list")]
 pub async fn list_statistics(http_request: HttpRequest, payload: web::Payload, pagination: web::Query<PaginationQuery>, app_state: web::Data<AppState>,) -> HttpResponse {
     let _ = match get_payload_and_verify(&http_request, payload, &app_state).instrument(tracing::Span::current()).await {
@@ -44,7 +45,7 @@ pub async fn list_statistics(http_request: HttpRequest, payload: web::Payload, p
 /**
  * Add a new statistics type.
  */
-#[instrument(level = "info", skip(http_request, app_state, payload), fields(service = "addStatistics", trace_id = get_trace_id(&http_request), result))]
+#[instrument(level = "info", skip(http_request, app_state, payload), fields(service = "addStatistics", trace_id = get_trace_id(&http_request), result), name = "api:add_statistics")]
 #[post("/api/services/v1_0/statistics")]
 pub async fn add_statistic(http_request: HttpRequest, payload: web::Payload, app_state: web::Data<AppState>) -> HttpResponse {
     let payload = match get_payload_and_verify(&http_request, payload, &app_state).instrument(tracing::Span::current()).await {
@@ -65,7 +66,7 @@ pub async fn add_statistic(http_request: HttpRequest, payload: web::Payload, app
 /**
  * Handles the deletion of a statistics type.
  */
-#[instrument(level = "info", skip(http_request, app_state, payload), fields(service = "deleteStatistics", trace_id = get_trace_id(&http_request), result))]
+#[instrument(level = "info", skip(http_request, app_state, payload), fields(service = "deleteStatistics", trace_id = get_trace_id(&http_request), result), name = "api:delete_statistics")]
 #[delete("/api/services/v1_0/statistics/{statisticsId}")]
 pub async fn delete_statistics(path: Path<i64>, payload: web::Payload, http_request: HttpRequest, app_state: web::Data<AppState>) -> HttpResponse {
     let _ = match get_payload_and_verify(&http_request, payload, &app_state).instrument(tracing::Span::current()).await {
@@ -82,14 +83,15 @@ pub async fn delete_statistics(path: Path<i64>, payload: web::Payload, http_requ
 /**
  * List municipalities.
  */
-#[instrument(level = "info", skip(http_request, app_state, payload), fields(service = "listMunicipalities", trace_id = get_trace_id(&http_request), result))]
+#[instrument(level = "info", skip(http_request, app_state, payload), fields(service = "listMunicipalities", trace_id = get_trace_id(&http_request), result), name = "api:list_municipalities")]
 #[post("/api/services/v1_0/municipalities:list")]
 pub async fn list_municipalities(pagination: web::Query<PaginationQuery>, payload: web::Payload, http_request: HttpRequest, app_state: web::Data<AppState>,) -> HttpResponse {
-    let _ = match get_payload_and_verify(&http_request, payload, &app_state).instrument(tracing::Span::current()).await {
+    let span = tracing::Span::current();
+    let _ = match get_payload_and_verify(&http_request, payload, &app_state).instrument(span.clone()).await {
         Ok(payload) => payload,
         Err(err) => return add_signature_headers(HttpResponse::from_error(err), &app_state),
     };
-    let values_list_response = match do_list_municipalities(&pagination, &app_state).instrument(tracing::Span::current()).await {
+    let values_list_response = match do_list_municipalities(&pagination, &app_state).instrument(span.clone()).await {
         Ok(response) => response,
         Err(err) => {
             return add_signature_headers(HttpResponse::from_error(err), &app_state);
@@ -106,7 +108,7 @@ pub async fn list_municipalities(pagination: web::Query<PaginationQuery>, payloa
 /**
  * Adds a new municipality.
  */
-#[instrument(level = "info", skip(http_request, app_state, payload), fields(service = "addMunicipality", trace_id = get_trace_id(&http_request), result))]
+#[instrument(level = "info", skip(http_request, app_state, payload), fields(service = "addMunicipality", trace_id = get_trace_id(&http_request), result), name = "api:add_municipality")]
 #[post("/api/services/v1_0/municipalities")]
 pub async fn add_municipality(http_request: HttpRequest, payload: web::Payload, app_state: web::Data<AppState>) -> HttpResponse {
     let payload: Bytes = match get_payload_and_verify(&http_request, payload, &app_state).instrument(tracing::Span::current()).await {
@@ -127,7 +129,7 @@ pub async fn add_municipality(http_request: HttpRequest, payload: web::Payload, 
 /**
  * Handles the deletion of a municipality.
  */
-#[instrument(level = "info", skip(http_request, app_state, payload), fields(service = "deleteMunicipality", trace_id = get_trace_id(&http_request), result))]
+#[instrument(level = "info", skip(http_request, app_state, payload), fields(service = "deleteMunicipality", trace_id = get_trace_id(&http_request), result), name = "api:delete_municipality")]
 #[delete("/api/services/v1_0/municipalities/{municipalityId}")]
 pub async fn delete_municipality(path: Path<i64>, payload: web::Payload, http_request: HttpRequest, app_state: web::Data<AppState>) -> HttpResponse {
     let _ = match get_payload_and_verify(&http_request, payload, &app_state).instrument(tracing::Span::current()).await {
@@ -144,7 +146,7 @@ pub async fn delete_municipality(path: Path<i64>, payload: web::Payload, http_re
 /**
  * Endpoint to retrieve a list of values.
  */
-#[instrument(level = "info", skip(http_request, app_state, payload), fields(service = "listValues", trace_id = get_trace_id(&http_request), result))]
+#[instrument(level = "info", skip(http_request, app_state, payload), fields(service = "listValues", trace_id = get_trace_id(&http_request), result), name = "api:list_values")]
 #[post("/api/services/v1_0/values:list")]
 pub async fn list_values(http_request: HttpRequest, payload: web::Payload, pagination: web::Query<PaginationQuery>, app_state: web::Data<AppState>,) -> HttpResponse {
     let payload = match get_payload_and_verify(&http_request, payload, &app_state).instrument(tracing::Span::current()).await {
@@ -172,7 +174,7 @@ pub async fn list_values(http_request: HttpRequest, payload: web::Payload, pagin
 /**
  * Endpoint to add a new value.
  */
-#[instrument(level = "info", skip(http_request, app_state, payload), fields(service = "addValue", trace_id = get_trace_id(&http_request), result))]
+#[instrument(level = "info", skip(http_request, app_state, payload), fields(service = "addValue", trace_id = get_trace_id(&http_request), result), name = "api:add_value")]
 #[post("/api/services/v1_0/values")]
 pub async fn add_value(http_request: HttpRequest, payload: web::Payload, app_state: web::Data<AppState>) -> HttpResponse {
     let payload = match get_payload_and_verify(&http_request, payload, &app_state).await {
@@ -193,7 +195,7 @@ pub async fn add_value(http_request: HttpRequest, payload: web::Payload, app_sta
 /**
  * Endpoint to delete values.
  */
-#[instrument(level = "info", skip(http_request, app_state, payload), fields(service = "deleteValue", trace_id = get_trace_id(&http_request), result))]
+#[instrument(level = "info", skip(http_request, app_state, payload), fields(service = "deleteValue", trace_id = get_trace_id(&http_request), result), name = "api:delete_value")]
 #[delete("/api/services/v1_0/values/{valueId}")]
 pub async fn delete_value(path: Path<i64>, payload: web::Payload, http_request: HttpRequest, app_state: web::Data<AppState>) -> HttpResponse {
     let _ = match get_payload_and_verify(&http_request, payload, &app_state).instrument(tracing::Span::current()).await {
@@ -210,7 +212,7 @@ pub async fn delete_value(path: Path<i64>, payload: web::Payload, http_request: 
 /**
  * Endpoint to update values.
  */
-#[instrument(level = "info", skip(http_request, app_state, payload), fields(service = "updateValue", trace_id = get_trace_id(&http_request), result))]
+#[instrument(level = "info", skip(http_request, app_state, payload), fields(service = "updateValue", trace_id = get_trace_id(&http_request), result), name = "api:update_value")]
 #[put("/api/services/v1_0/values/{valueId}")]
 pub async fn update_value(path: Path<i64>, http_request: HttpRequest, payload: web::Payload, app_state: web::Data<AppState>) -> HttpResponse {
     let payload = match get_payload_and_verify(&http_request, payload, &app_state).instrument(tracing::Span::current()).await {

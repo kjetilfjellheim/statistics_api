@@ -44,49 +44,15 @@ pub struct Config {
 
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LoggingConfig {
-    /**
-     * Whether to log the target of the log message.
-     */
-    pub target: bool,
-    /**
-     * Whether to log thread IDs .
-     */
-    pub thread_ids: bool,
-    /**
-     * Whether to log thread names.
-     */
-    pub thread_names: bool,
-    /**
-     * Whether to log line numbers.
-     */
-    pub line_number: bool,
-    /**
-     * Whether to log the log level.
-     */
-    pub level: bool,
-    /**
-     * Whether to use ANSI colors in logs.
-     */
-    pub ansi: bool,
-    /**
-     * Whether to log file.
-     */
-    pub file: bool,
-    /**
-     * Path to the log file.
-     */
-    pub logfile: String,
-    /**
-     * Additional directives for logging configuration.
-     */
-    pub directives: Vec<String>,
+    pub jaeger_url: Option<String>,
 }
 
 impl LoggingConfig {
     #[allow(dead_code)]
     pub fn default() -> Self {
-        LoggingConfig { target: true, thread_ids: true, thread_names: true, line_number: true, level: true, ansi: true, file: true, logfile: "/tmp/statistics_api.log".to_string(), directives: vec![] }
+        LoggingConfig { jaeger_url: None }
     }
 }
 
@@ -241,14 +207,7 @@ mod test {
         };
         let serialized = toml::to_string(&config).unwrap();
         let deserialized: Config = toml::from_str(&serialized).unwrap();
-        assert_eq!(config.logging.target, deserialized.logging.target);
-        assert_eq!(config.logging.thread_ids, deserialized.logging.thread_ids);
-        assert_eq!(config.logging.line_number, deserialized.logging.line_number);
-        assert_eq!(config.logging.level, deserialized.logging.level);
-        assert_eq!(config.logging.ansi, deserialized.logging.ansi);
-        assert_eq!(config.logging.file, deserialized.logging.file);
-        assert_eq!(config.logging.logfile, deserialized.logging.logfile);
-        assert_eq!(config.logging.directives, deserialized.logging.directives);
+        assert_eq!(config.logging.jaeger_url, deserialized.logging.jaeger_url);
         assert_eq!(config.server.workers, deserialized.server.workers);
         assert_eq!(config.server.http_port, deserialized.server.http_port);
         assert!(deserialized.server.https_config.is_none());
