@@ -22,7 +22,6 @@ rustls-pemfile = "2.2.0" # For handling PEM files
 chrono = { version = "0.4.41", features = ["serde"] } # For date and time handling
 sqlx = { version = "0.8.6", features = [ "runtime-tokio", "postgres", "macros", "rust_decimal", "chrono", "migrate" ] } # For PostgreSQL support with SQLx
 rust_decimal = "1.37.2" # For decimal support in SQLx
-prometheus = "0.14.0" #For prometheus monitoring
 actix-web-prom = { version = "0.10.0", features = ["process"]} #For prometheus monitoring
 uuid = { version = "1.18.1", features = ["v4"] } # For generating unique identifiers when trace id is missing.
 sha2 = "0.10.9" # For SHA-256 hashing
@@ -37,7 +36,9 @@ opentelemetry-otlp = { version = "0.29.0", features = ["http"] } # For OTLP expo
 opentelemetry_sdk = { version = "0.29.0", features = ["trace", "metrics", "rt-tokio-current-thread"] } # For OpenTelemetry SDK
 opentelemetry-appender-tracing = { version = "0.29.0" } # For OpenTelemetry appender tracing
 opentelemetry-semantic-conventions = { version = "0.29.0" } # For OpenTelemetry semantic conventions
+opentelemetry-prometheus = { version = "0.29.0" } # For OpenTelemetry Prometheus integration
 tracing-opentelemetry = { version = "0.30.0"}
+prometheus = { version = "0.14.0" }
 
 [dev-dependencies]
 dotenv = "0.15.0" # For loading environment variables from a .env file

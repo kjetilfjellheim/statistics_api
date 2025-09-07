@@ -1,5 +1,6 @@
 [logging]
 jaegerUrl = "http://localhost:4318/v1/traces" # Optional URL for Jaeger collector. If not set, OpenTelemetry tracing is disabled.
+prometheusUrl = "http://localhost:9090/api/v1/otlp/v1/metrics" # Optional URL for Prometheus metrics. If not set, Prometheus metrics are disabled.
 
 [security]
 incomingVerificationRequirements = [

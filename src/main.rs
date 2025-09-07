@@ -23,7 +23,8 @@ use actix_web_prom::{PrometheusMetrics, PrometheusMetricsBuilder};
 use clap::Parser;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry::{KeyValue, global};
-use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_otlp::{WithExportConfig};
+use opentelemetry_sdk::metrics::{SdkMeterProvider, Temporality};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::SdkTracerProvider;
@@ -31,13 +32,13 @@ use opentelemetry_semantic_conventions::{
     SCHEMA_URL,
     attribute::{DEPLOYMENT_ENVIRONMENT_NAME, SERVICE_VERSION},
 };
-use prometheus::IntGauge;
+use prometheus::{IntGauge};
 use rustls::pki_types::PrivateKeyDer;
 use rustls::{ServerConfig, SupportedProtocolVersion};
 use rustls_pemfile::{certs, pkcs8_private_keys};
 use sqlx::{Pool, Postgres, pool};
-use tracing::Level;
 use tracing_opentelemetry::OpenTelemetryLayer;
+use tracing_subscriber::EnvFilter;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 /**
@@ -51,6 +52,10 @@ async fn main() -> std::io::Result<()> {
 
     if let Some(jaeger_url) = config.clone().logging.jaeger_url {
         init_telemetry(&jaeger_url)?;
+    }
+
+    if let Some(prometheus_url) = config.clone().logging.prometheus_url {
+        init_prometheus_exporter(&prometheus_url)?;
     }
 
     let connection_pool: Pool<Postgres> = match config.clone().database.db_type {
@@ -95,6 +100,7 @@ async fn main() -> std::io::Result<()> {
 
     let server_init = HttpServer::new(move || {
         App::new()
+            .wrap(prometheus.clone())
             .wrap(RequestTracing::default())
             .wrap(RequestMetrics::default())
             .app_data(state.clone())
@@ -147,13 +153,49 @@ fn init_telemetry(jaeger_url: &str) -> Result<(), std::io::Error> {
                 .build()
                 .map_err(|err| std::io::Error::other(format!("Failed to create OTLP trace exporter: {err}")))?,
         )
+        .with_resource(service_name_resource.clone())
+        .build();
+
+    let tracer: opentelemetry_sdk::trace::Tracer = tracer_provider.tracer("statistics_api");
+    tracing_subscriber::registry().with(EnvFilter::from_default_env()).with(tracing_subscriber::fmt::layer()).with(OpenTelemetryLayer::new(tracer)).init();
+
+    global::set_tracer_provider(tracer_provider);
+    Ok(())
+}
+
+/**
+ * Initializes the Prometheus exporter for the application.
+ *
+ * #Arguments
+ * `prometheus_url`: The URL of the Prometheus instance to send metrics to.
+ *
+ * #Returns
+ * A `Result` indicating success or failure.
+ */
+fn init_prometheus_exporter(prometheus_url: &str) -> Result<(), std::io::Error> {
+    let service_name_resource = Resource::builder_empty()
+        .with_attribute(KeyValue::new("service.name", "statistics api"))
+        .with_schema_url([KeyValue::new(SERVICE_VERSION, env!("CARGO_PKG_VERSION")), KeyValue::new(DEPLOYMENT_ENVIRONMENT_NAME, "develop")], SCHEMA_URL)
+        .build();
+
+    let prometheus_registry = prometheus::Registry::new();
+    let exporter = opentelemetry_prometheus::exporter()
+        .with_registry(prometheus_registry.clone())
+        .build().map_err(|err| std::io::Error::other(format!("Failed to create Prometheus exporter: {err}")))?;
+
+    let metrics_provider = SdkMeterProvider::builder()
+        .with_reader(exporter)
+        .with_periodic_exporter(opentelemetry_otlp::MetricExporter::builder()
+            .with_temporality(Temporality::Delta)
+            .with_http()
+            .with_protocol(opentelemetry_otlp::Protocol::HttpJson)
+            .with_endpoint(prometheus_url)
+            .build()
+            .map_err(|err| std::io::Error::other(format!("Failed to create OTLP metric exporter: {err}")))?)
         .with_resource(service_name_resource)
         .build();
 
-    let tracer = tracer_provider.tracer("statistics_api");
-    tracing_subscriber::registry().with(tracing_subscriber::filter::LevelFilter::from_level(Level::INFO)).with(tracing_subscriber::fmt::layer()).with(OpenTelemetryLayer::new(tracer)).init();
-
-    global::set_tracer_provider(tracer_provider);
+    global::set_meter_provider(metrics_provider);
     Ok(())
 }
 

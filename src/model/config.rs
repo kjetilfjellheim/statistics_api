@@ -47,12 +47,13 @@ pub struct Config {
 #[serde(rename_all = "camelCase")]
 pub struct LoggingConfig {
     pub jaeger_url: Option<String>,
+    pub prometheus_url: Option<String>,
 }
 
 impl LoggingConfig {
     #[allow(dead_code)]
     pub fn default() -> Self {
-        LoggingConfig { jaeger_url: None }
+        LoggingConfig { jaeger_url: None, prometheus_url: None }
     }
 }
 
