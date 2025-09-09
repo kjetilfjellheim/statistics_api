@@ -23,3 +23,18 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yaml
       - --web.enable-otlp-receiver
+  loki:
+    image: grafana/loki:latest
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./config/loki-config.yaml:/etc/loki/loki.yaml
+    command: -config.file=/etc/loki/loki.yaml
+  promtail:
+    image: grafana/promtail:latest
+    volumes:
+      - ./config/promtail-config.yaml:/etc/promtail/config.yml
+      - /var/log:/var/log
+      - /etc/hostname:/etc/hostname
+      - /etc/hosts:/etc/hosts
+    command: -config.file=/etc/promtail/config.yml

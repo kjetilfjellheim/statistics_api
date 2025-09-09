@@ -6,7 +6,7 @@ use actix_web::{
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use sha2::{Digest, Sha256, Sha384, Sha512};
-use tracing::{debug, error, info, instrument, warn, Instrument};
+use tracing::{debug, error, event, info, instrument, warn, Instrument, Level};
 
 use crate::{
     api::{
@@ -30,6 +30,7 @@ use crate::{
 #[instrument(level = "debug", skip(http_request, app_state, payload), fields(service = "listStatistics", trace_id = get_trace_id(&http_request), result), name = "api:list_statistics")]
 #[post("/api/services/v1_0/statistics:list")]
 pub async fn list_statistics(http_request: HttpRequest, payload: web::Payload, pagination: web::Query<PaginationQuery>, app_state: web::Data<AppState>) -> HttpResponse {
+    event!(Level::INFO, "Listing statistics");
     let _ = match get_payload_and_verify(&http_request, payload, &app_state).instrument(tracing::Span::current()).await {
         Ok(payload) => payload,
         Err(err) => return add_signature_headers(HttpResponse::from_error(err), &app_state),

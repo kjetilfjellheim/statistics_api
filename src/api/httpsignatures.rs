@@ -12,7 +12,7 @@ use openssl::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
-use tracing::{debug, warn};
+use tracing::{debug, instrument, warn};
 
 /**
  * Signature algorithms.
@@ -78,6 +78,7 @@ impl HttpSignaturesService {
      * # Returns
      * A `Result` indicating success or failure of the verification.
      */
+    #[instrument(level = "debug", skip(self), fields(service = "verifyInputSignature", trace_id = headers.get("x-request-id"), result), name = "service:verify_input_signature")]
     pub fn verify_signature(&self, headers: &HashMap<String, String>, derive_elements: &DeriveInputElements) -> Result<(), HttpSignaturesError> {
         if let Some(requirements) = &self.input_verification_requirements {
             debug!("Verifying signature with headers: {:?}", headers);
@@ -102,6 +103,7 @@ impl HttpSignaturesService {
      * # Returns
      * A `Result` containing the generated signature or an error if generation fails.
      */
+    #[instrument(level = "debug", skip(self), fields(service = "generateResponseSignature", trace_id = headers.get("x-request-id"), result), name = "service:generate_response_signature")]
     pub fn generate_response_signature(&self, headers: &HashMap<String, String>, derive_elements: &DeriveInputElements) -> Result<Option<(String, String)>, HttpSignaturesError> {
         if let Some(requirements) = &self.response_generation_requirements
             && let Some(generating_secret) = &self.generating_secret

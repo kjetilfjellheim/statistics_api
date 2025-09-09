@@ -37,6 +37,7 @@ use rustls::pki_types::PrivateKeyDer;
 use rustls::{ServerConfig, SupportedProtocolVersion};
 use rustls_pemfile::{certs, pkcs8_private_keys};
 use sqlx::{Pool, Postgres, pool};
+use tracing_loki::url::Url;
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -50,13 +51,9 @@ async fn main() -> std::io::Result<()> {
 
     let config = get_config(&args.config_file)?;
 
-    if let Some(jaeger_url) = config.clone().logging.jaeger_url {
-        init_telemetry(&jaeger_url)?;
-    }
+    init_tracing(&config.logging.jaeger_url, &config.logging.loki_url).map_err(|err| std::io::Error::other(format!("Failed to initialize Loki logging: {err}")))?;
 
-    if let Some(prometheus_url) = config.clone().logging.prometheus_url {
-        init_prometheus_exporter(&prometheus_url)?;
-    }
+    init_prometheus_exporter(&config.logging.prometheus_url)?;
 
     let connection_pool: Pool<Postgres> = match config.clone().database.db_type {
         DatabaseType::Postgresql { connection_string, max_connections, min_connections, acquire_timeout, acquire_slow_threshold, idle_timeout, max_lifetime } => pool::PoolOptions::new()
@@ -136,13 +133,18 @@ async fn main() -> std::io::Result<()> {
  * #Returns
  * A `Result` indicating success or failure.
  */
-fn init_telemetry(jaeger_url: &str) -> Result<(), std::io::Error> {
+fn init_tracing(jaeger_url: &str, loki_url: &str) -> Result<(), std::io::Error> {
+    
     global::set_text_map_propagator(TraceContextPropagator::new());
 
     let service_name_resource = Resource::builder_empty()
         .with_attribute(KeyValue::new("service.name", "statistics api"))
         .with_schema_url([KeyValue::new(SERVICE_VERSION, env!("CARGO_PKG_VERSION")), KeyValue::new(DEPLOYMENT_ENVIRONMENT_NAME, "develop")], SCHEMA_URL)
         .build();
+
+    let (loki_layer, task) = tracing_loki::builder()
+        .label("host", "mine").map_err(|err| std::io::Error::other(format!("Failed to create Loki layer: {err}")))?
+        .build_url(Url::parse(loki_url).unwrap()).map_err(|err| std::io::Error::other(format!("Failed to build Loki URL: {err}")))?;
 
     let tracer_provider = SdkTracerProvider::builder()
         .with_batch_exporter(
@@ -157,9 +159,13 @@ fn init_telemetry(jaeger_url: &str) -> Result<(), std::io::Error> {
         .build();
 
     let tracer: opentelemetry_sdk::trace::Tracer = tracer_provider.tracer("statistics_api");
-    tracing_subscriber::registry().with(EnvFilter::from_default_env()).with(tracing_subscriber::fmt::layer()).with(OpenTelemetryLayer::new(tracer)).init();
 
     global::set_tracer_provider(tracer_provider);
+
+    tokio::spawn(task);
+
+    tracing_subscriber::registry().with(EnvFilter::from_default_env()).with(loki_layer).with(tracing_subscriber::fmt::layer()).with(OpenTelemetryLayer::new(tracer)).init();
+
     Ok(())
 }
 

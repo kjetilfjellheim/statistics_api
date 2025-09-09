@@ -1,6 +1,7 @@
 [logging]
-jaegerUrl = "http://localhost:4318/v1/traces" # Optional URL for Jaeger collector. If not set, OpenTelemetry tracing is disabled.
-prometheusUrl = "http://localhost:9090/api/v1/otlp/v1/metrics" # Optional URL for Prometheus metrics. If not set, Prometheus metrics are disabled.
+jaegerUrl = "http://planescape.forgottendonkey.com:4318/v1/traces" 
+prometheusUrl = "http://planescape.forgottendonkey.com:9090/api/v1/otlp/v1/metrics" 
+lokiUrl = "http://planescape.forgottendonkey.com:3100"
 
 [security]
 incomingVerificationRequirements = [
@@ -63,7 +64,7 @@ workers = 24
 httpPort = 8080
 
 [database.dbType.postgresql]
-connectionString = "postgres://postgres:1234@localhost:5432/statistics"
+connectionString = "postgres://statistics_rw:statistics@greyhawk.forgottendonkey.com:5432/statistics"
 maxConnections = 200
 minConnections = 5
 acquireTimeout = 6000

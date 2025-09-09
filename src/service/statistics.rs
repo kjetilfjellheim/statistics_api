@@ -70,10 +70,12 @@ impl StatisticsService {
     pub async fn add_municipality(&self, municipality_add_input: MunicipalityAddInputType) -> Result<(), ApplicationError> {
         let mut transaction = self.begin_transaction().await?;
         match self.statistics_dao.add_municipality(&mut transaction, municipality_add_input).instrument(tracing::Span::current()).await {
-            Ok(()) => transaction.commit().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to commit transaction: {err}")))?,
+            Ok(()) => {
+                self.commit(transaction).await?;
+            },
             Err(err) => {
                 info!("Error occurred while adding municipality: {:?}", err);
-                transaction.rollback().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to rollback transaction: {err}")))?;
+                self.rollback(transaction).await?;
                 return Err(err);
             }
         }
@@ -93,10 +95,10 @@ impl StatisticsService {
     pub async fn delete_municipality(&self, municipality_id: i64) -> Result<(), ApplicationError> {
         let mut transaction = self.begin_transaction().await?;
         match self.statistics_dao.delete_municipality(&mut transaction, municipality_id).instrument(tracing::Span::current()).await {
-            Ok(()) => transaction.commit().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to commit transaction: {err}")))?,
+            Ok(()) => self.commit(transaction).await?,
             Err(err) => {
                 info!("Error occurred while deleting municipality: {:?}", err);
-                transaction.rollback().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to rollback transaction: {err}")))?;
+                self.rollback(transaction).await?;
                 return Err(err);
             }
         }
@@ -131,10 +133,10 @@ impl StatisticsService {
     pub async fn add_statistic(&self, statistics_add_input: StatisticAddInputType) -> Result<(), ApplicationError> {
         let mut transaction = self.begin_transaction().await?;
         match self.statistics_dao.add_statistics(&mut transaction, statistics_add_input).instrument(tracing::Span::current()).await {
-            Ok(()) => transaction.commit().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to commit transaction: {err}")))?,
+            Ok(()) => self.commit(transaction).await?,
             Err(err) => {
                 info!("Error occurred while adding statistic: {:?}", err);
-                transaction.rollback().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to rollback transaction: {err}")))?;
+                self.rollback(transaction).await?;
                 return Err(err);
             }
         }
@@ -154,10 +156,10 @@ impl StatisticsService {
     pub async fn delete_statistics(&self, statistics_id: i64) -> Result<(), ApplicationError> {
         let mut transaction = self.begin_transaction().await?;
         match self.statistics_dao.delete_statistics(&mut transaction, statistics_id).instrument(tracing::Span::current()).await {
-            Ok(()) => transaction.commit().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to commit transaction: {err}")))?,
+            Ok(()) => self.commit(transaction).await?,
             Err(err) => {
                 info!("Error occurred while deleting statistic: {:?}", err);
-                transaction.rollback().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to rollback transaction: {err}")))?;
+                self.rollback(transaction).await?;
                 return Err(err);
             }
         }
@@ -193,10 +195,10 @@ impl StatisticsService {
     pub async fn delete_value(&self, value_id: i64) -> Result<(), ApplicationError> {
         let mut transaction = self.begin_transaction().await?;
         match self.statistics_dao.delete_value(&mut transaction, value_id).instrument(tracing::Span::current()).await {
-            Ok(()) => transaction.commit().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to commit transaction: {err}")))?,
+            Ok(()) => self.commit(transaction).await?,
             Err(err) => {
                 info!("Error occurred while deleting value: {:?}", err);
-                transaction.rollback().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to rollback transaction: {err}")))?;
+                self.rollback(transaction).await?;
                 return Err(err);
             }
         }
@@ -216,10 +218,10 @@ impl StatisticsService {
     pub async fn add_value(&self, value_add_input: ValuesAddUpdateInputType) -> Result<(), ApplicationError> {
         let mut transaction = self.begin_transaction().await?;
         match self.statistics_dao.add_value(&mut transaction, value_add_input).instrument(tracing::Span::current()).await {
-            Ok(_value_id) => transaction.commit().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to commit transaction: {err}")))?,
+            Ok(_value_id) => self.commit(transaction).await?,
             Err(err) => {
                 info!("Error occurred while adding value: {:?}", err);
-                transaction.rollback().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to rollback transaction: {err}")))?;
+                self.rollback(transaction).await?;
                 return Err(err);
             }
         }
@@ -240,10 +242,10 @@ impl StatisticsService {
     pub async fn update_value(&self, value_id: i64, value_add_update_input: ValuesAddUpdateInputType) -> Result<(), ApplicationError> {
         let mut transaction = self.begin_transaction().await?;
         match self.statistics_dao.update_value(&mut transaction, value_id, value_add_update_input).instrument(tracing::Span::current()).await {
-            Ok(()) => transaction.commit().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to commit transaction: {err}")))?,
+            Ok(()) => self.commit(transaction).await?,
             Err(err) => {
                 info!("Error occurred while updating value: {:?}", err);
-                transaction.rollback().await.map_err(|err| ApplicationError::new(ErrorType::DatabaseError, format!("Failed to rollback transaction: {err}")))?;
+                self.rollback(transaction).await?;
                 return Err(err);
             }
         }
@@ -275,5 +277,39 @@ impl StatisticsService {
         self.connection_pool.begin().instrument(tracing::Span::current()).await.map_err(|err| {
             ApplicationError::new(ErrorType::DatabaseError, format!("Failed to begin transaction: {err}"))
         })
+    }
+
+    /**
+     * Commits a database transaction.
+     *
+     * # Arguments
+     * `transaction`: The transaction to be committed.
+     *
+     * # Returns
+     * A Result indicating success or an `ApplicationError`.
+     */
+    #[instrument(level = "debug", skip(self), name = "service:commit_transaction")]
+    async fn commit(&self, transaction: sqlx::Transaction<'_, Postgres>) -> Result<(), ApplicationError> {
+        transaction.commit().instrument(tracing::Span::current()).await.map_err(|err| {
+            ApplicationError::new(ErrorType::DatabaseError, format!("Failed to commit transaction: {err}"))
+        })?;
+        Ok(())
+    }
+
+    /**
+     * Rolls back a database transaction.
+     *
+     * # Arguments
+     * `transaction`: The transaction to be rolled back.
+     *
+     * # Returns
+     * A Result indicating success or an `ApplicationError`.
+     */
+    #[instrument(level = "debug", skip(self), name = "service:rollback_transaction")]
+    async fn rollback(&self, transaction: sqlx::Transaction<'_, Postgres>) -> Result<(), ApplicationError> {
+        transaction.rollback().instrument(tracing::Span::current()).await.map_err(|err| {
+            ApplicationError::new(ErrorType::DatabaseError, format!("Failed to rollback transaction: {err}"))
+        })?;
+        Ok(())
     }
 }

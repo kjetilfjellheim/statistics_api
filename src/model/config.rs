@@ -46,14 +46,15 @@ pub struct Config {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoggingConfig {
-    pub jaeger_url: Option<String>,
-    pub prometheus_url: Option<String>,
+    pub jaeger_url: String,
+    pub prometheus_url: String,
+    pub loki_url: String,
 }
 
 impl LoggingConfig {
     #[allow(dead_code)]
     pub fn default() -> Self {
-        LoggingConfig { jaeger_url: None, prometheus_url: None }
+        LoggingConfig { jaeger_url: "".into(), prometheus_url: "".into(), loki_url: "".into() }
     }
 }
 
